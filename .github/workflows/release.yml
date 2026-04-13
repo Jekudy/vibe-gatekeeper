@@ -45,6 +45,9 @@ jobs:
           context: .
           file: ./Dockerfile.bot
           push: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/Jekudy/vibe-gatekeeper
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha }}
           tags: |
             ${{ env.IMAGE_BOT }}:${{ steps.meta.outputs.sha_tag }}
             ${{ env.IMAGE_BOT }}:main
@@ -55,6 +58,9 @@ jobs:
           context: .
           file: ./Dockerfile.web
           push: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/Jekudy/vibe-gatekeeper
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha }}
           tags: |
             ${{ env.IMAGE_WEB }}:${{ steps.meta.outputs.sha_tag }}
             ${{ env.IMAGE_WEB }}:main
