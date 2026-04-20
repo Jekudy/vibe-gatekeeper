@@ -62,17 +62,16 @@ Never commit:
 
 ## Current Server State
 
-As of 2026-04-19:
+As of 2026-04-20 (prod cutover completed):
 
 - GitHub repo exists at `https://github.com/Jekudy/vibe-gatekeeper`.
 - CI is green on `main`.
 - Release workflow is gated on successful CI and pushes bot/web images to GHCR.
-- Coolify is installed on the VPS in parallel to the old runtime.
-- Coolify dashboard is intentionally bound to the Tailscale IP only:
-  - `http://100.101.196.21:8100`
-- The old production runtime is still alive:
-  - path: `/home/claw/vibe-gatekeeper`
-  - public web: `0.0.0.0:8080`
+- Coolify dashboard on Tailscale IP only: `http://100.101.196.21:8100`.
+- Public VPS IP: `187.77.98.73` (Hostinger srv1435593).
+- **Production bot `@vibeshkoder_bot` is now running under Coolify** (Docker-managed via Coolify).
+- Legacy runtime at `/home/claw/vibe-gatekeeper` was stopped and removed on 2026-04-20 via `docker compose down`.
+- Public web: `0.0.0.0:8080` is now owned by the Coolify-managed web container.
 
 ## Coolify Registry & SSH (resolved 2026-04-19)
 
@@ -84,15 +83,15 @@ As of 2026-04-19:
   - Coolify localhost public key re-added to `/root/.ssh/authorized_keys`
   - server validation now reports `is_reachable=true`, `is_usable=true`
 
-## Coolify Staging Resources
+## Coolify Prod Resources
 
-Created in Coolify on 2026-04-19, project `My first project` / environment `staging`:
+Initially created on 2026-04-19 as "staging" shells, repurposed as prod on 2026-04-20 after direct cutover (no staging phase; `DEV_MODE=false` on both apps). Names still carry `-staging` suffix — cosmetic, rename later. Coolify project: `My first project` / environment: `staging` (label, not runtime).
 
 | Kind | UUID | Notes |
 |---|---|---|
-| App `vibe-gatekeeper-web` | `cexv50jspo5gl3kq6ojypw43` | image `ghcr.io/jekudy/vibe-gatekeeper-web:main`, port `18080:8080` |
-| App `vibe-gatekeeper-bot-staging` | `maiwn569gziz935wv0w7kcch` | image `ghcr.io/jekudy/vibe-gatekeeper-bot:main` |
-| Postgres `vibe-gatekeeper-pg-staging` | `hdazvm5fz836xj9mdyn8c629` | `postgres:15-alpine`, db `vibe_gatekeeper`, user `vibe` |
+| App `vibe-gatekeeper-web` | `cexv50jspo5gl3kq6ojypw43` | image `ghcr.io/jekudy/vibe-gatekeeper-web:main`, port `8080:8080` (public), fqdn sslip `cexv50jspo5gl3kq6ojypw43.187.77.98.73.sslip.io` |
+| App `vibe-gatekeeper-bot-staging` | `maiwn569gziz935wv0w7kcch` | image `ghcr.io/jekudy/vibe-gatekeeper-bot:main`, polling mode |
+| Postgres `vibe-gatekeeper-pg-staging` | `hdazvm5fz836xj9mdyn8c629` | `postgres:15-alpine`, db `vibe_gatekeeper`, user `vibe`, data migrated from legacy on 2026-04-20 |
 | Redis `vibe-gatekeeper-redis-staging` | `gl28f0g5exzzo4k8w0auzygk` | `redis:7-alpine`, password set |
 
 Internal connection strings:
@@ -100,23 +99,37 @@ Internal connection strings:
 - `DATABASE_URL=postgresql+asyncpg://vibe:<DB_PW>@hdazvm5fz836xj9mdyn8c629:5432/vibe_gatekeeper`
 - `REDIS_URL=redis://default:<REDIS_PW>@gl28f0g5exzzo4k8w0auzygk:6379/0`
 
-DB / Redis / web passwords are stored in Coolify env vars only.
+DB / Redis / web passwords are stored in Coolify env vars only. API token in `~/.env.tokens:COOLIFY_API_TOKEN`.
 
-## Remaining Manual Steps Before First Successful Staging Boot
+Both apps use `custom_docker_run_options = -v /home/claw/vibe-gatekeeper/credentials.json:/app/credentials.json:ro` to mount Google service account credentials from the legacy directory (file preserved, not deleted).
 
-The web app currently fails at startup because pydantic settings reject the placeholder values. To finish staging, the following env vars on **both** apps must be replaced with real values:
+## Prod Cutover — 2026-04-20
 
-- `BOT_TOKEN` — staging bot token from `@BotFather` (or reuse the existing preview-env value if confirmed)
-- `COMMUNITY_CHAT_ID` — must be a valid integer
-- `GOOGLE_SHEET_ID` — staging Google Sheet ID
-- `WEB_BASE_URL` (web only) — public URL once Caddy / sslip mapping is decided
+Executed directly from legacy → Coolify prod (staging skipped, per user direction to work with prod only).
 
-Plus on the file system inside the web/bot containers:
+1. Cleaned Coolify env vars: deleted all `is_preview=true` duplicates; set runtime vars (`BOT_TOKEN`, `COMMUNITY_CHAT_ID=-1002716490518`, `ADMIN_IDS=[149820031]`, `GOOGLE_SHEET_ID`, `WEB_BASE_URL=http://187.77.98.73:8080`, `WEB_BOT_USERNAME=vibeshkoder_bot`, `WEB_PASSWORD=***REMOVED***`, `DEV_MODE=false`) sourced from legacy `/home/claw/vibe-gatekeeper/.env`.
+2. Mounted `credentials.json` into both apps via `custom_docker_run_options`.
+3. Dumped legacy DB (`vibe-gatekeeper-db-1` → `pg_dump --clean --if-exists`) and restored into Coolify postgres. Row counts post-restore: users=275, applications=58, intros=44, vouch_log=39, questionnaire_answers=340, chat_messages=3109, alembic_version=1.
+4. Stopped legacy bot first (Telegram session release), made a final incremental dump + restore to capture delta.
+5. `docker compose down` on legacy — port 8080 and BOT_TOKEN both free.
+6. PATCHed Coolify web `ports_mappings: 18080:8080 → 8080:8080` and redeployed.
+7. Deployed Coolify bot for the first time.
+8. Verified: `curl http://187.77.98.73:8080 → 302`, bot logs show `Run polling for bot @vibeshkoder_bot id=8271790115 - 'Shkoder'`, scheduler jobs registered (`check_vouch_deadlines`, `check_intro_refresh`, `sync_google_sheets`), real chat updates being handled within 500ms of start.
 
-- `/app/credentials.json` — Google service account JSON for `GOOGLE_SHEETS_CREDS_FILE`. Coolify volume mount or build-time secret needs to be wired.
+## Rollback Procedure
 
-After those values are set, redeploy web and bot from Coolify and run the smoke checks in `docs/ops/vibe-gatekeeper-staging-cutover.md`.
+If Coolify prod becomes unhealthy:
 
-## Current Bootstrap Limitation
+```bash
+ssh claw@187.77.98.73
+TOKEN=<coolify api token>
+API=http://100.101.196.21:8100/api/v1
+# 1. Stop Coolify bot FIRST to release BOT_TOKEN from Telegram session:
+curl -X POST -H "Authorization: Bearer $TOKEN" "$API/applications/maiwn569gziz935wv0w7kcch/stop"
+# 2. Stop Coolify web to free port 8080:
+curl -X POST -H "Authorization: Bearer $TOKEN" "$API/applications/cexv50jspo5gl3kq6ojypw43/stop"
+# 3. Restart legacy stack:
+cd /home/claw/vibe-gatekeeper && docker compose up -d
+```
 
-The old production runtime at `/home/claw/vibe-gatekeeper` remains the live user path until the new staging path is verified and a controlled bot cutover window is prepared.
+Legacy `docker-compose.yml`, `.env`, and `credentials.json` are preserved in `/home/claw/vibe-gatekeeper` — do not delete until prod has run stably for 7+ days.
