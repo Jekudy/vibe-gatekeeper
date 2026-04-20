@@ -62,7 +62,7 @@ Never commit:
 
 ## Current Server State
 
-As of 2026-04-12:
+As of 2026-04-19:
 
 - GitHub repo exists at `https://github.com/Jekudy/vibe-gatekeeper`.
 - CI is green on `main`.
@@ -74,16 +74,48 @@ As of 2026-04-12:
   - path: `/home/claw/vibe-gatekeeper`
   - public web: `0.0.0.0:8080`
 
-## Current Deployment Blocker
+## Coolify Registry & SSH (resolved 2026-04-19)
 
-Coolify is ready, but staging deployment from GHCR is not finished yet because the current local GitHub CLI token does not have `read:packages`, and GHCR image pulls return `denied`.
+- GHCR pull is unblocked via `docker login ghcr.io -u Jekudy` on the VPS as root.
+- Auth lives in `/root/.docker/config.json`.
+- Coolify reuses the host Docker daemon, so no Coolify-side registry resource is needed.
+- Coolify localhost server bootstrap was repaired again on 2026-04-19:
+  - `servers.id=0` user reverted to `root`
+  - Coolify localhost public key re-added to `/root/.ssh/authorized_keys`
+  - server validation now reports `is_reachable=true`, `is_usable=true`
 
-One of these must be true before Coolify can deploy the `bot` and `web` images:
+## Coolify Staging Resources
 
-- GHCR packages are made public, or
-- a GitHub token with `read:packages` is added to Coolify as registry credentials
+Created in Coolify on 2026-04-19, project `My first project` / environment `staging`:
 
-This does not affect the already-working CI and image release path. It only blocks the final `Coolify -> pull from GHCR` step.
+| Kind | UUID | Notes |
+|---|---|---|
+| App `vibe-gatekeeper-web` | `cexv50jspo5gl3kq6ojypw43` | image `ghcr.io/jekudy/vibe-gatekeeper-web:main`, port `18080:8080` |
+| App `vibe-gatekeeper-bot-staging` | `maiwn569gziz935wv0w7kcch` | image `ghcr.io/jekudy/vibe-gatekeeper-bot:main` |
+| Postgres `vibe-gatekeeper-pg-staging` | `hdazvm5fz836xj9mdyn8c629` | `postgres:15-alpine`, db `vibe_gatekeeper`, user `vibe` |
+| Redis `vibe-gatekeeper-redis-staging` | `gl28f0g5exzzo4k8w0auzygk` | `redis:7-alpine`, password set |
+
+Internal connection strings:
+
+- `DATABASE_URL=postgresql+asyncpg://vibe:<DB_PW>@hdazvm5fz836xj9mdyn8c629:5432/vibe_gatekeeper`
+- `REDIS_URL=redis://default:<REDIS_PW>@gl28f0g5exzzo4k8w0auzygk:6379/0`
+
+DB / Redis / web passwords are stored in Coolify env vars only.
+
+## Remaining Manual Steps Before First Successful Staging Boot
+
+The web app currently fails at startup because pydantic settings reject the placeholder values. To finish staging, the following env vars on **both** apps must be replaced with real values:
+
+- `BOT_TOKEN` — staging bot token from `@BotFather` (or reuse the existing preview-env value if confirmed)
+- `COMMUNITY_CHAT_ID` — must be a valid integer
+- `GOOGLE_SHEET_ID` — staging Google Sheet ID
+- `WEB_BASE_URL` (web only) — public URL once Caddy / sslip mapping is decided
+
+Plus on the file system inside the web/bot containers:
+
+- `/app/credentials.json` — Google service account JSON for `GOOGLE_SHEETS_CREDS_FILE`. Coolify volume mount or build-time secret needs to be wired.
+
+After those values are set, redeploy web and bot from Coolify and run the smoke checks in `docs/ops/vibe-gatekeeper-staging-cutover.md`.
 
 ## Current Bootstrap Limitation
 
