@@ -6,6 +6,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from web.auth import get_user_from_cookie
 
@@ -16,9 +19,17 @@ TEMPLATES = Jinja2Templates(directory=str(_WEB_DIR / "templates"))
 # Paths that don't require authentication
 _PUBLIC_PATHS = {"/login", "/docs", "/openapi.json"}
 
+# Module-level limiter instance — routes import this to apply decorators.
+# Uses in-memory storage (suitable for single-process deployments).
+limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")
+
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Vibe Gatekeeper Admin")
+
+    # Register slowapi limiter and its 429 handler.
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
     # Mount static files
     app.mount("/static", StaticFiles(directory=str(_WEB_DIR / "static")), name="static")

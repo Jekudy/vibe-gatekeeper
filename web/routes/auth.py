@@ -3,8 +3,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import RedirectResponse
 
-from web.app import TEMPLATES
+from web.app import TEMPLATES, limiter
 from web.auth import verify_password, create_session_cookie, COOKIE_MAX_AGE
+from web.config import settings
 
 router = APIRouter()
 
@@ -19,6 +20,7 @@ async def login_page(request: Request, error: str = ""):
 
 
 @router.post("/login")
+@limiter.limit(f"{settings.LOGIN_RATE_LIMIT_PER_15M}/15 minutes")
 async def login_submit(request: Request, password: str = Form(...)):
     """Verify password, set session cookie, redirect to dashboard."""
     if not verify_password(password):
