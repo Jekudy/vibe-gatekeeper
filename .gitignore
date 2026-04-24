@@ -18,3 +18,11 @@ dist/
 build/
 *.egg-info/
 docs/ops/private/
+
+# Superflow / Claude Code runtime
+.superflow/
+.superflow-state.json
+CLAUDE.local.md
+.claude/data/
+.agent/
+.superset/

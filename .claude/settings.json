@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FILE_PATH=\"$CLAUDE_FILE_PATHS\"; if echo \"$FILE_PATH\" | grep -qE '\\.py$'; then uvx ruff format \"$FILE_PATH\" 2>/dev/null && uvx ruff check --fix \"$FILE_PATH\" 2>/dev/null; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

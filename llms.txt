@@ -1,0 +1,99 @@
+# vibe-gatekeeper
+
+> Telegram gatekeeper bot (aiogram 3) + FastAPI admin web for community onboarding: applications, vouching, intro refresh, and admin/member visibility. Python 3.12, SQLAlchemy 2 async, PostgreSQL, Redis, deployed as GHCR images via Coolify.
+
+## Overview
+- [README](./README.md): Local setup, env layout, GHCR image names (80 LOC)
+- [CLAUDE.md](./CLAUDE.md): AI assistant instructions for this repo
+- [SPEC.md](./SPEC.md): Product spec (347 LOC — has known drift, see §7 auth and §1 test list; cross-check against code)
+- [Runbook](./docs/runbook.md): Authoritative ops state — environment model, Coolify resources, prod cutover log (2026-04-20), rollback procedure (135 LOC)
+- [Project Health Report](./docs/superflow/project-health-report.md): Phase 0 audit — 45 findings, prioritized tech debt (155 LOC)
+
+## Core Source
+
+The bot is the primary service (aiogram 3 long polling). The web app is a thin FastAPI admin surface for dashboards and member search. Both share `bot.db` models and `bot.config` settings — web imports from bot, never the reverse.
+
+- [Bot entry](./bot/__main__.py): Builds aiogram `Bot`+`Dispatcher`, installs `DbSessionMiddleware`, registers 7 routers, picks `MemoryStorage` (DEV) vs `RedisStorage` (prod), starts APScheduler on startup (95 LOC)
+- [Bot config](./bot/config.py): `pydantic-settings` `Settings` class; `.env` → env vars. DEV_MODE gates SQLite + in-memory FSM
+- [Bot handlers](./bot/handlers/): 7 routers — start/questionnaire/vouch/admin/chat_events/forward_lookup/chat_messages (7 files, ~1,049 LOC)
+- [Questionnaire FSM](./bot/handlers/questionnaire.py): 7-question onboarding flow (290 LOC — largest handler)
+- [Vouch flow](./bot/handlers/vouch.py): "Ручаюсь" callback, double-vouch race protection (169 LOC)
+- [Chat events](./bot/handlers/chat_events.py): join/leave/kick on community chat (211 LOC)
+- [DB models](./bot/db/models.py): SQLAlchemy 2 `DeclarativeBase` — users, applications, intros, vouch_log, questionnaire_answers, chat_messages (148 LOC)
+- [DB engine](./bot/db/engine.py): async engine + `async_sessionmaker` (12 LOC)
+- [DB repos](./bot/db/repos/): 6 repository modules — user, application, questionnaire, vouch, intro, message (6 files, ~411 LOC)
+- [Sheets sync](./bot/services/sheets.py): `gspread` (sync) Google Sheets adapter; 5-min scheduler job (431 LOC — largest file)
+- [Scheduler](./bot/services/scheduler.py): APScheduler `AsyncIOScheduler` — vouch-deadline, intro-refresh, sheets-sync jobs (229 LOC)
+- [Invite service](./bot/services/invite.py): one-time invite link generation (47 LOC)
+- [DB session middleware](./bot/middlewares/db_session.py): aiogram middleware injecting `AsyncSession` per update
+- [Texts](./bot/texts.py): All user-facing Russian strings, centralized (133 LOC)
+- [Filters](./bot/filters/chat_type.py): `ChatType` filter for private / group routing
+- [Keyboards](./bot/keyboards/inline.py): Inline button factories + `CallbackData` prefixes
+- [States](./bot/states/questionnaire.py): `StatesGroup` for the 7-question FSM
+
+## Web Admin
+
+- [Web entry](./web/__main__.py): uvicorn on `0.0.0.0:8080`, imports `create_app` (7 LOC)
+- [Web factory](./web/app.py): `create_app` — FastAPI instance, auth middleware (redirects unauth to `/login`), mounts `/static`, includes 3 routers (58 LOC)
+- [Auth](./web/auth.py): Password + `itsdangerous.URLSafeTimedSerializer` cookie signer (34 LOC — NOTE: `SPEC.md §7` incorrectly describes a Telegram Login Widget; actual is password form)
+- [Login route](./web/routes/auth.py): GET/POST `/login`, cookie set (51 LOC)
+- [Dashboard](./web/routes/dashboard.py): Funnel stats — applications by status (48 LOC)
+- [Members](./web/routes/members.py): Member list + name search (96 LOC)
+- [Web config](./web/config.py): Re-uses `bot.config.settings` (3 LOC — duplicate instantiation is a known smell)
+- [Templates](./web/templates/): 4 Jinja2 templates — base, login, dashboard, members (HTML + Bootstrap 5 CDN, no build step)
+- [Static](./web/static/style.css): Minimal overrides on top of Bootstrap CDN
+
+## Data & Migrations
+
+- [Alembic env](./alembic/env.py): Reads `DATABASE_URL`; rewrites `postgresql://` → `postgresql+asyncpg://` for offline mode (62 LOC)
+- [Initial migration](./alembic/versions/001_initial.py): All tables in one revision — mirrors `bot.db.models` (143 LOC)
+- [Alembic config](./alembic.ini): Script location, logging config
+- Note: In DEV mode, `bot/__main__.py:22-29` calls `Base.metadata.create_all` instead of running Alembic — drift risk (see health report)
+
+## Testing
+
+- [Tests dir](./tests/): 4 test files, 97 LOC total — conftest, test_settings, test_web_app, test_web_auth (pytest collects 4 tests)
+- [conftest](./tests/conftest.py): `app_env` fixture + `import_module` helper
+- Run: `pytest -q` (testpaths pinned to `tests/` in pyproject — root-level `test_*.py` files are NOT collected)
+- Coverage: 4 tests against ~48 source modules; 29 modules have zero direct tests. Prioritize adding tests for vouch/scheduler/sheets.
+
+## Configuration
+
+- [pyproject.toml](./pyproject.toml): Dependencies, ruff config (line-length 100, py312), pytest config, `[dev]` + `[ops]` extras (49 LOC)
+- [Env example](./.env.example): 12 required env vars — `BOT_TOKEN`, `COMMUNITY_CHAT_ID`, `ADMIN_IDS`, `DATABASE_URL`, `REDIS_URL`, `GOOGLE_SHEETS_CREDS_FILE`, `GOOGLE_SHEET_ID`, `WEB_BASE_URL`, `WEB_BOT_USERNAME`, `DB_PASSWORD`, `WEB_PASSWORD`, `DEV_MODE`
+- [Staging env](./.env.staging.example): Same key set, staging-specific values
+- [Production env](./.env.production.example): Same key set, prod-specific values
+- [docker-compose.yml](./docker-compose.yml): 4 services — bot, web, db (`postgres:16-alpine`, healthcheck), redis (`redis:7-alpine`)
+- [Dockerfile.bot](./Dockerfile.bot): Bot container — installs deps, runs `alembic upgrade head && python -m bot`
+- [Dockerfile.web](./Dockerfile.web): Web container — runs `python -m web` on port 8080
+
+## Infrastructure
+
+- [CI](./.github/workflows/ci.yml): `pytest -q` + `ruff check .` on PR and push to main/master (40 LOC)
+- [Release](./.github/workflows/release.yml): Triggered on successful CI on main; builds `Dockerfile.bot` + `Dockerfile.web`, pushes `sha-<hash>` + `:main` tags to `ghcr.io/jekudy/vibe-gatekeeper-{bot,web}` (67 LOC)
+- Deploy target: Coolify (watches `:main`); prod cutover completed 2026-04-20 — see `docs/runbook.md`
+- [.gitignore](./.gitignore): Covers `.env`, `.venv`, caches, `.worktrees/`, build artifacts
+
+## Documentation
+
+- [SPEC.md](./SPEC.md): Product intent (347 LOC). Known drift: §7 web-auth section describes a Telegram Login Widget that was never built; §1 structure diagram lists 4 tests that don't exist and omits `chat_events.py` and `repos/intro.py`
+- [Runbook](./docs/runbook.md): Coolify resource table, prod cutover log, rollback procedure (authoritative ops source)
+- [Coolify preflight](./docs/ops/coolify-preflight.md): VPS preparation checklist (92 LOC)
+- [Staging cutover (historical)](./docs/ops/vibe-gatekeeper-staging-cutover.md): Superseded by the 2026-04-20 prod cutover in runbook.md (68 LOC)
+- [VPS/GHCR/Coolify plan](./docs/superpowers/plans/2026-04-12-vps-git-ghcr-coolify.md): Original migration plan (143 LOC)
+- [VPS/GHCR/Coolify design](./docs/superpowers/specs/2026-04-12-vps-git-ghcr-coolify-design.md): Design spec for the same (184 LOC)
+- [Knowledge-layer plan](./docs/superpowers/plans/2026-04-19-coolify-knowledge-layer.md): Implementation plan (1,214 LOC)
+- [Knowledge-layer design](./docs/superpowers/specs/2026-04-19-coolify-knowledge-layer-design.md): Knowledge-layer spec (301 LOC)
+- [Project Health Report](./docs/superflow/project-health-report.md): Phase 0 Superflow audit — 45 findings across architecture / security / docs / devops
+
+## Optional
+
+- Note: undocumented ops scripts at repo root (not packaged by setuptools, excluded from pytest collection):
+  - [`phone_login.py`](./phone_login.py): Telethon user-mode login helper (87 LOC)
+  - [`scan_work.py`](./scan_work.py): Telethon ops script — chat scanning (74 LOC)
+  - [`transcribe_voice.py`](./transcribe_voice.py): Telethon voice-message transcription helper (56 LOC)
+  - [`test_all.py`](./test_all.py): Manual Telethon end-to-end smoke script — needs `TELEGRAM_SESSION` / `TELEGRAM_API_ID`; not collected by pytest (219 LOC)
+  - [`test_flow.py`](./test_flow.py): Manual Telethon flow script (84 LOC)
+  - All five require the `[ops]` extra (`telethon>=1.39`) from `pyproject.toml:32`
+
+<!-- updated-by-superflow:2026-04-24 -->
