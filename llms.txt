@@ -36,8 +36,8 @@ The bot is the primary service (aiogram 3 long polling). The web app is a thin F
 
 - [Web entry](./web/__main__.py): uvicorn on `0.0.0.0:8080`, imports `create_app` (7 LOC)
 - [Web factory](./web/app.py): `create_app` — FastAPI instance, auth middleware (redirects unauth to `/login`), mounts `/static`, includes 3 routers (58 LOC)
-- [Auth](./web/auth.py): Password + `itsdangerous.URLSafeTimedSerializer` cookie signer (34 LOC — NOTE: `SPEC.md §7` incorrectly describes a Telegram Login Widget; actual is password form)
-- [Login route](./web/routes/auth.py): GET/POST `/login`, cookie set (51 LOC)
+- [Auth](./web/auth.py): Password + `itsdangerous.URLSafeTimedSerializer` cookie signer (34 LOC — NOTE: `SPEC.md §7` has an italic note acknowledging the Widget spec was not built; actual is password form)
+- [Login route](./web/routes/auth.py): GET/POST `/login`, cookie set; slowapi rate-limit: `LOGIN_RATE_LIMIT_PER_15M` (default 5) attempts per 15 min per client IP; uses X-Forwarded-For for proxy-aware key (sprint-2)
 - [Web session DI](./web/dependencies.py): `get_session()` FastAPI Depends helper — yields `AsyncSession` with commit/rollback lifecycle; used by all route handlers
 - [Dashboard](./web/routes/dashboard.py): Funnel stats — applications by status; uses `Depends(get_session)`
 - [Members](./web/routes/members.py): Member list + name search; uses `Depends(get_session)`
@@ -54,7 +54,7 @@ The bot is the primary service (aiogram 3 long polling). The web app is a thin F
 
 ## Testing
 
-- [Tests dir](./tests/): 9 test files, 46 tests total — pytest collects from `tests/` only
+- [Tests dir](./tests/): 11 test files, 52 tests total — pytest collects from `tests/` only
 - [conftest](./tests/conftest.py): fixtures — `app_env` (env monkeypatch), `session_factory_sqlite` (in-memory SQLite async sessionmaker), `aiogram_bot_mock` (AsyncMock Bot), `chat_member_factory`, `message_factory`, `callback_query_factory`
 - [test_chat_events](./tests/test_chat_events.py): 11 tests — join/leave handler logic and DB side-effects
 - [test_intro_refresh](./tests/test_intro_refresh.py): 5 tests — intro refresh scheduler job
@@ -65,18 +65,20 @@ The bot is the primary service (aiogram 3 long polling). The web app is a thin F
 - [test_settings](./tests/test_settings.py): 1 test — config/settings loading
 - [test_web_app](./tests/test_web_app.py): 1 test — FastAPI app factory
 - [test_web_auth](./tests/test_web_auth.py): 2 tests — web auth flow
+- [test_display_name](./tests/test_display_name.py): 3 tests — `_display_name()` helper in members route (sprint-2)
+- [test_login_rate_limit](./tests/test_login_rate_limit.py): 3 tests — slowapi /login rate-limit and per-IP X-Forwarded-For bucketing (sprint-2)
 - Run: `pytest -q` (testpaths pinned to `tests/` in pyproject — root-level `test_*.py` files are NOT collected)
 - Note: `pytest-asyncio` is not in dev deps; async code in tests is wrapped in `asyncio.run()` inside sync test functions
 
 ## Configuration
 
 - [pyproject.toml](./pyproject.toml): Dependencies, ruff config (line-length 100, py312), pytest config, `[dev]` + `[ops]` extras (49 LOC)
-- [Env example](./.env.example): 12 required env vars — `BOT_TOKEN`, `COMMUNITY_CHAT_ID`, `ADMIN_IDS`, `DATABASE_URL`, `REDIS_URL`, `GOOGLE_SHEETS_CREDS_FILE`, `GOOGLE_SHEET_ID`, `WEB_BASE_URL`, `WEB_BOT_USERNAME`, `DB_PASSWORD`, `WEB_PASSWORD`, `DEV_MODE`
+- [Env example](./.env.example): 12 required env vars — `BOT_TOKEN`, `COMMUNITY_CHAT_ID`, `ADMIN_IDS`, `DATABASE_URL`, `REDIS_URL`, `GOOGLE_SHEETS_CREDS_FILE`, `GOOGLE_SHEET_ID`, `WEB_BASE_URL`, `WEB_BOT_USERNAME`, `DB_PASSWORD`, `WEB_PASSWORD`, `DEV_MODE`; plus 4 optional sprint-2 vars (commented out): `INTRO_NUDGE_PHASE_1_MAX`, `INTRO_NUDGE_PHASE_2_MAX`, `LOGIN_RATE_LIMIT_PER_15M`, `TRUSTED_PROXY_HOSTS`
 - [Staging env](./.env.staging.example): Same key set, staging-specific values
 - [Production env](./.env.production.example): Same key set, prod-specific values
 - [docker-compose.yml](./docker-compose.yml): 4 services — bot, web, db (`postgres:16-alpine`, healthcheck), redis (`redis:7-alpine`)
-- [Dockerfile.bot](./Dockerfile.bot): Bot container — installs deps, runs `alembic upgrade head && python -m bot`
-- [Dockerfile.web](./Dockerfile.web): Web container — runs `python -m web` on port 8080
+- [Dockerfile.bot](./Dockerfile.bot): Bot container — multi-stage build, non-root `app` user, HEALTHCHECK via `/tmp/bot-heartbeat` file (sprint-2); runs `alembic upgrade head && python -m bot`
+- [Dockerfile.web](./Dockerfile.web): Web container — multi-stage build, non-root `app` user, HEALTHCHECK via `curl /login` (sprint-2); runs `python -m web` on port 8080
 
 ## Infrastructure
 
@@ -87,7 +89,7 @@ The bot is the primary service (aiogram 3 long polling). The web app is a thin F
 
 ## Documentation
 
-- [SPEC.md](./SPEC.md): Product intent (347 LOC). Known drift: §7 web-auth section describes a Telegram Login Widget that was never built; §1 structure diagram lists 4 tests that don't exist and omits `chat_events.py` and `repos/intro.py`
+- [SPEC.md](./SPEC.md): Product intent (347 LOC). Known drift: §7 web-auth section still describes a Telegram Login Widget that was never built, but now carries an implementation-differs note (sprint-2); §1 structure diagram and test list updated to match reality (sprint-2)
 - [Runbook](./docs/runbook.md): Coolify resource table, prod cutover log, rollback procedure (authoritative ops source)
 - [Coolify preflight](./docs/ops/coolify-preflight.md): VPS preparation checklist (92 LOC)
 - [Staging cutover (historical)](./docs/ops/vibe-gatekeeper-staging-cutover.md): Superseded by the 2026-04-20 prod cutover in runbook.md (68 LOC)
@@ -107,4 +109,4 @@ The bot is the primary service (aiogram 3 long polling). The web app is a thin F
   - [`test_flow.py`](./test_flow.py): Manual Telethon flow script (84 LOC)
   - All five require the `[ops]` extra (`telethon>=1.39`) from `pyproject.toml:32`
 
-<!-- updated-by-superflow:2026-04-25 -->
+<!-- updated-by-superflow:2026-04-25 sprint-2 -->
