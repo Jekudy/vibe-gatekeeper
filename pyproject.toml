@@ -8,7 +8,6 @@ dependencies = [
     "asyncpg>=0.30",
     "alembic>=1.14",
     "pydantic-settings>=2.0",
-    "gspread-asyncio>=2.0",
     "gspread>=6.0",
     "google-auth>=2.0",
     "fastapi>=0.115",
@@ -16,9 +15,7 @@ dependencies = [
     "uvicorn>=0.34",
     "apscheduler>=3.10,<4",
     "redis>=5.0",
-    "python-dotenv>=1.0",
     "itsdangerous>=2.0",
-    "httpx>=0.28",
     "python-multipart>=0.0.9",
     "aiosqlite>=0.20",
 ]
@@ -42,6 +39,7 @@ include = ["bot*", "web*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "-q --tb=short --strict-markers"
 
 [tool.ruff]
 line-length = 100

@@ -20,7 +20,7 @@ async def members(
 ):
     stmt = (
         select(User)
-        .where(User.is_member == True)  # noqa: E712
+        .where(User.is_member.is_(True))
         .options(selectinload(User.intro))
         .order_by(User.first_name)
     )
