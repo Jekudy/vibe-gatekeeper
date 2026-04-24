@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     BOT_TOKEN: str
     COMMUNITY_CHAT_ID: int = 0
     ADMIN_IDS: list[int] = []
-    DATABASE_URL: str = "postgresql+asyncpg://vibe:changeme@db:5432/vibe_gatekeeper"
+    DATABASE_URL: str
     REDIS_URL: str = "redis://redis:6379/0"
     GOOGLE_SHEETS_CREDS_FILE: str = ""
     GOOGLE_SHEET_ID: str = ""
@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     VOUCH_TIMEOUT_HOURS: int = 72
     NUDGE_TIMEOUT_HOURS: int = 48
     INTRO_REFRESH_DAYS: int = 90
-    WEB_PASSWORD: str = "admin"
+    WEB_PASSWORD: str
     DEV_MODE: bool = False  # Use SQLite + MemoryStorage for local testing
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}

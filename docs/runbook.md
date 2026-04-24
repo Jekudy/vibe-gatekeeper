@@ -103,11 +103,13 @@ DB / Redis / web passwords are stored in Coolify env vars only. API token in `~/
 
 Both apps use `custom_docker_run_options = -v /home/claw/vibe-gatekeeper/credentials.json:/app/credentials.json:ro` to mount Google service account credentials from the legacy directory (file preserved, not deleted).
 
+> Note: secret values (tokens, passwords, signed keys) are redacted in this document. Actual values live only in Coolify env vars and local `.env` files. Never commit secret values to this file.
+
 ## Prod Cutover — 2026-04-20
 
 Executed directly from legacy → Coolify prod (staging skipped, per user direction to work with prod only).
 
-1. Cleaned Coolify env vars: deleted all `is_preview=true` duplicates; set runtime vars (`BOT_TOKEN`, `COMMUNITY_CHAT_ID=-1002716490518`, `ADMIN_IDS=[149820031]`, `GOOGLE_SHEET_ID`, `WEB_BASE_URL=http://187.77.98.73:8080`, `WEB_BOT_USERNAME=vibeshkoder_bot`, `WEB_PASSWORD=vibeshkoders2026`, `DEV_MODE=false`) sourced from legacy `/home/claw/vibe-gatekeeper/.env`.
+1. Cleaned Coolify env vars: deleted all `is_preview=true` duplicates; set runtime vars (`BOT_TOKEN`, `COMMUNITY_CHAT_ID=-1002716490518`, `ADMIN_IDS=[149820031]`, `GOOGLE_SHEET_ID`, `WEB_BASE_URL=http://187.77.98.73:8080`, `WEB_BOT_USERNAME=vibeshkoder_bot`, `WEB_PASSWORD=<managed in Coolify env — not committed>`, `DEV_MODE=false`) sourced from legacy `/home/claw/vibe-gatekeeper/.env`.
 2. Mounted `credentials.json` into both apps via `custom_docker_run_options`.
 3. Dumped legacy DB (`vibe-gatekeeper-db-1` → `pg_dump --clean --if-exists`) and restored into Coolify postgres. Row counts post-restore: users=275, applications=58, intros=44, vouch_log=39, questionnaire_answers=340, chat_messages=3109, alembic_version=1.
 4. Stopped legacy bot first (Telegram session release), made a final incremental dump + restore to capture delta.

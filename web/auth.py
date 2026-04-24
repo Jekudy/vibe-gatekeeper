@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import secrets
 
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
@@ -14,7 +15,7 @@ _COOKIE_MAX_AGE = 7 * 24 * 60 * 60  # 7 days
 
 def verify_password(password: str) -> bool:
     """Check password against the configured WEB_PASSWORD."""
-    return password == settings.WEB_PASSWORD
+    return secrets.compare_digest(password, settings.WEB_PASSWORD)
 
 
 def create_session_cookie() -> str:
