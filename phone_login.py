@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Phone-based login: sends code, waits for code in /tmp/tg_code.txt, outputs session string."""
+
 import asyncio
 import os
 import sys
@@ -10,6 +11,7 @@ from telethon.sessions import StringSession
 API_ID = int(os.environ["TELEGRAM_API_ID"])
 API_HASH = os.environ["TELEGRAM_API_HASH"]
 PHONE = os.environ["TELEGRAM_PHONE"]
+
 
 async def main():
     client = TelegramClient(StringSession(), API_ID, API_HASH)
@@ -82,6 +84,7 @@ async def main():
         f.write(ss)
     print("DONE", flush=True)
     await client.disconnect()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

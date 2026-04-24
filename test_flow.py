@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Test the bot flow as @lookingformeow."""
+
 import asyncio
 import os
 
@@ -59,13 +60,13 @@ async def main():
         resp = await wait_for_response(client, last_id)
         if resp:
             preview = resp.text[:100] if resp.text else "(no text)"
-            print(f"  Q{i+1}: {answer[:30]}... → BOT: {preview}")
+            print(f"  Q{i + 1}: {answer[:30]}... → BOT: {preview}")
             has_buttons = bool(resp.reply_markup)
             if has_buttons:
                 print("       [has buttons]")
             last_id = resp.id
         else:
-            print(f"  Q{i+1}: {answer[:30]}... → (no response)")
+            print(f"  Q{i + 1}: {answer[:30]}... → (no response)")
 
     # After last answer, we should get confirm prompt with buttons
     if resp and resp.reply_markup:

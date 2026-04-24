@@ -101,9 +101,7 @@ async def _check_vouch_deadlines(session: AsyncSession, bot: Bot) -> None:
                 try:
                     await bot.send_message(
                         chat_id=admin_id,
-                        text=ADMIN_NUDGE_MSG.format(
-                            name=name, username=username, app_id=app.id
-                        ),
+                        text=ADMIN_NUDGE_MSG.format(name=name, username=username, app_id=app.id),
                     )
                 except Exception:
                     logger.warning("Failed to notify admin %s", admin_id)
@@ -122,9 +120,7 @@ async def check_vouch_deadlines(bot: Bot) -> None:
 
 async def _check_intro_refresh(session: AsyncSession, bot: Bot) -> None:
     """Daily job body: remind members with stale intros to refresh."""
-    stale_intros = await IntroRepo.get_stale_intros(
-        session, settings.INTRO_REFRESH_DAYS
-    )
+    stale_intros = await IntroRepo.get_stale_intros(session, settings.INTRO_REFRESH_DAYS)
     now = datetime.now(timezone.utc)
 
     for intro in stale_intros:
@@ -157,10 +153,7 @@ async def _check_intro_refresh(session: AsyncSession, bot: Bot) -> None:
 
         if tracking.phase == "daily":
             if tracking.reminders_sent < 5:
-                if (
-                    tracking.last_reminder_at is None
-                    or (now - tracking.last_reminder_at).days >= 1
-                ):
+                if tracking.last_reminder_at is None or (now - tracking.last_reminder_at).days >= 1:
                     should_send = True
             else:
                 # Move to every_2_days
@@ -169,10 +162,7 @@ async def _check_intro_refresh(session: AsyncSession, bot: Bot) -> None:
 
         if tracking.phase == "every_2_days":
             if tracking.reminders_sent < 8:  # 5 daily + 3 every_2_days
-                if (
-                    tracking.last_reminder_at is None
-                    or (now - tracking.last_reminder_at).days >= 2
-                ):
+                if tracking.last_reminder_at is None or (now - tracking.last_reminder_at).days >= 2:
                     should_send = True
             else:
                 tracking.phase = "done"
@@ -182,9 +172,7 @@ async def _check_intro_refresh(session: AsyncSession, bot: Bot) -> None:
 
         if should_send:
             try:
-                await bot.send_message(
-                    chat_id=intro.user_id, text=REFRESH_PROMPT
-                )
+                await bot.send_message(chat_id=intro.user_id, text=REFRESH_PROMPT)
                 tracking.reminders_sent += 1
                 tracking.last_reminder_at = now
                 await session.flush()

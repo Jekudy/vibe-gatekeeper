@@ -26,8 +26,12 @@ def upgrade() -> None:
         sa.Column("is_admin", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("joined_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("left_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
 
@@ -44,8 +48,12 @@ def upgrade() -> None:
         sa.Column("nudged_newcomer_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("rejected_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("added_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
         sa.ForeignKeyConstraint(["vouched_by"], ["users.id"]),
@@ -61,7 +69,9 @@ def upgrade() -> None:
         sa.Column("question_index", sa.SmallInteger(), nullable=False),
         sa.Column("question_text", sa.Text(), nullable=False),
         sa.Column("answer_text", sa.Text(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.Column("is_current", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
@@ -78,8 +88,12 @@ def upgrade() -> None:
         sa.Column("vouched_by_name", sa.String(255), nullable=False),
         sa.Column("sheets_row_number", sa.Integer(), nullable=True),
         sa.Column("last_synced_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
         sa.UniqueConstraint("user_id"),
@@ -95,11 +109,15 @@ def upgrade() -> None:
         sa.Column("text", sa.Text(), nullable=True),
         sa.Column("date", sa.DateTime(timezone=True), nullable=False),
         sa.Column("raw_json", sa.JSON(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
     )
-    op.create_index("ix_chat_messages_chat_msg", "chat_messages", ["chat_id", "message_id"], unique=True)
+    op.create_index(
+        "ix_chat_messages_chat_msg", "chat_messages", ["chat_id", "message_id"], unique=True
+    )
 
     # intro_refresh_tracking
     op.create_table(
@@ -122,7 +140,9 @@ def upgrade() -> None:
         sa.Column("voucher_id", sa.BigInteger(), nullable=False),
         sa.Column("vouchee_id", sa.BigInteger(), nullable=False),
         sa.Column("application_id", sa.Integer(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(["voucher_id"], ["users.id"]),
         sa.ForeignKeyConstraint(["vouchee_id"], ["users.id"]),

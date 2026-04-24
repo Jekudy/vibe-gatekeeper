@@ -7,6 +7,7 @@ of connecting to the real database.
 
 Each job is tested for: triggered (condition met) and not-triggered (no data).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -149,9 +150,7 @@ class TestCheckIntroRefresh:
                 # Back-date to 91 days ago so it's stale
                 old_ts = datetime.now(timezone.utc) - timedelta(days=91)
                 await session.execute(
-                    update(Intro)
-                    .where(Intro.user_id == 8001)
-                    .values(updated_at=old_ts)
+                    update(Intro).where(Intro.user_id == 8001).values(updated_at=old_ts)
                 )
                 await session.commit()
 

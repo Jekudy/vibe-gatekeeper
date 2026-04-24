@@ -40,7 +40,9 @@ class User(Base):
         DateTime(timezone=True), default=func.now(), server_default=func.now(), onupdate=func.now()
     )
 
-    intro: Mapped[Intro | None] = relationship("Intro", back_populates="user", foreign_keys="[Intro.user_id]")
+    intro: Mapped[Intro | None] = relationship(
+        "Intro", back_populates="user", foreign_keys="[Intro.user_id]"
+    )
 
 
 class Application(Base):
@@ -49,7 +51,9 @@ class Application(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
-    status: Mapped[str] = mapped_column(String(20))  # filling, pending, vouched, added, rejected, privacy_block
+    status: Mapped[str] = mapped_column(
+        String(20)
+    )  # filling, pending, vouched, added, rejected, privacy_block
     questionnaire_message_id: Mapped[int | None] = mapped_column(BigInteger)
     vouched_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))
     vouched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -108,9 +112,7 @@ class Intro(Base):
 
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
-    __table_args__ = (
-        Index("ix_chat_messages_chat_msg", "chat_id", "message_id", unique=True),
-    )
+    __table_args__ = (Index("ix_chat_messages_chat_msg", "chat_id", "message_id", unique=True),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     message_id: Mapped[int] = mapped_column(BigInteger)

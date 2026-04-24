@@ -47,9 +47,7 @@ async def save_chat_message(
             user_id=message.from_user.id,
             text=message.text,
             date=message.date,
-            raw_json=message.model_dump(mode="json", exclude_none=True)
-            if message.text
-            else None,
+            raw_json=message.model_dump(mode="json", exclude_none=True) if message.text else None,
         )
     except Exception:
         await session.rollback()

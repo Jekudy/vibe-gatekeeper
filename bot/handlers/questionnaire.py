@@ -58,6 +58,7 @@ def _get_current_index(state_name: str) -> int | None:
 
 # ── Answer handler for all 7 question states ────────────────────────
 
+
 @router.message(
     QuestionnaireForm.q1_name,
     PrivateChatFilter(),
@@ -146,32 +147,41 @@ async def handle_answer(
 
 # ── Non-text message error for question states ──────────────────────
 
+
 @router.message(
-    QuestionnaireForm.q1_name, PrivateChatFilter(),
+    QuestionnaireForm.q1_name,
+    PrivateChatFilter(),
 )
 @router.message(
-    QuestionnaireForm.q2_location, PrivateChatFilter(),
+    QuestionnaireForm.q2_location,
+    PrivateChatFilter(),
 )
 @router.message(
-    QuestionnaireForm.q3_source, PrivateChatFilter(),
+    QuestionnaireForm.q3_source,
+    PrivateChatFilter(),
 )
 @router.message(
-    QuestionnaireForm.q4_experience, PrivateChatFilter(),
+    QuestionnaireForm.q4_experience,
+    PrivateChatFilter(),
 )
 @router.message(
-    QuestionnaireForm.q5_projects, PrivateChatFilter(),
+    QuestionnaireForm.q5_projects,
+    PrivateChatFilter(),
 )
 @router.message(
-    QuestionnaireForm.q6_hardest, PrivateChatFilter(),
+    QuestionnaireForm.q6_hardest,
+    PrivateChatFilter(),
 )
 @router.message(
-    QuestionnaireForm.q7_goals, PrivateChatFilter(),
+    QuestionnaireForm.q7_goals,
+    PrivateChatFilter(),
 )
 async def handle_non_text(message: Message) -> None:
     await message.answer(NOT_TEXT_ERROR)
 
 
 # ── Confirm callback ────────────────────────────────────────────────
+
 
 @router.callback_query(ConfirmCallback.filter())
 async def handle_confirm(
@@ -196,9 +206,7 @@ async def handle_confirm(
                 application_id=application_id,
             )
         await state.set_state(QuestionnaireForm.q1_name)
-        await callback.message.edit_text(
-            NEXT_QUESTION.format(question=QUESTIONS[0])
-        )
+        await callback.message.edit_text(NEXT_QUESTION.format(question=QUESTIONS[0]))
         await callback.answer()
         return
 
@@ -223,13 +231,9 @@ async def handle_confirm(
 
             if is_refresh:
                 # Refresh: preserve vouched_by_name from existing intro
-                existing_intro = await IntroRepo.get(
-                    session, callback.from_user.id
-                )
+                existing_intro = await IntroRepo.get(session, callback.from_user.id)
                 vouched_by_name = (
-                    existing_intro.vouched_by_name
-                    if existing_intro
-                    else "времена до бота"
+                    existing_intro.vouched_by_name if existing_intro else "времена до бота"
                 )
             else:
                 vouched_by_name = "времена до бота"
@@ -240,9 +244,7 @@ async def handle_confirm(
                 intro_text=intro_text,
                 vouched_by_name=vouched_by_name,
             )
-            await ApplicationRepo.update_status(
-                session, application_id, "added"
-            )
+            await ApplicationRepo.update_status(session, application_id, "added")
             await state.clear()
 
             # Post intro in community chat (without vouch button)
@@ -263,9 +265,7 @@ async def handle_confirm(
 
                 await callback.message.edit_text(REFRESH_SAVED)
             else:
-                await callback.message.edit_text(
-                    "Интро сохранено! Спасибо."
-                )
+                await callback.message.edit_text("Интро сохранено! Спасибо.")
         else:
             # New applicant: post to community chat
             header = f"📋 Новая анкета от {user_display}"

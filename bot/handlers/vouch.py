@@ -122,9 +122,7 @@ async def handle_vouch(
                 reply_markup=ready_keyboard(app_id),
             )
         except Exception:
-            logger.warning(
-                "Failed to send privacy block message to user %s", app.user_id
-            )
+            logger.warning("Failed to send privacy block message to user %s", app.user_id)
 
     await callback.answer("Готово! Спасибо за ручательство.")
 
@@ -158,13 +156,10 @@ async def handle_ready(
     if success:
         await ApplicationRepo.update_status(session, app_id, "vouched")
         if callback.message is not None:
-            await callback.message.edit_text(
-                "Инвайт отправлен! Проверь личные сообщения."
-            )
+            await callback.message.edit_text("Инвайт отправлен! Проверь личные сообщения.")
         await callback.answer()
     else:
         await callback.answer(
-            "Всё ещё не удаётся отправить инвайт. "
-            "Проверь настройки приватности и попробуй снова.",
+            "Всё ещё не удаётся отправить инвайт. Проверь настройки приватности и попробуй снова.",
             show_alert=True,
         )

@@ -24,9 +24,10 @@ def _is_join(update: ChatMemberUpdated) -> bool:
     """Check if this update represents a user joining the chat."""
     old = update.old_chat_member
     new = update.new_chat_member
-    return (
-        old.status in ("left", "kicked", "restricted")
-        and new.status in ("member", "administrator", "creator")
+    return old.status in ("left", "kicked", "restricted") and new.status in (
+        "member",
+        "administrator",
+        "creator",
     )
 
 
@@ -34,10 +35,7 @@ def _is_leave(update: ChatMemberUpdated) -> bool:
     """Check if this update represents a user leaving the chat."""
     old = update.old_chat_member
     new = update.new_chat_member
-    return (
-        old.status in ("member", "administrator", "creator")
-        and new.status in ("left", "kicked")
-    )
+    return old.status in ("member", "administrator", "creator") and new.status in ("left", "kicked")
 
 
 @router.chat_member()
@@ -51,7 +49,13 @@ async def handle_chat_member(
     tg_user = event.new_chat_member.user
     old_status = event.old_chat_member.status
     new_status = event.new_chat_member.status
-    logger.info("ChatMemberUpdated: user %s (%s) %s -> %s", tg_user.id, tg_user.first_name, old_status, new_status)
+    logger.info(
+        "ChatMemberUpdated: user %s (%s) %s -> %s",
+        tg_user.id,
+        tg_user.first_name,
+        old_status,
+        new_status,
+    )
 
     if _is_join(event):
         logger.info("Detected JOIN for user %s", tg_user.id)
@@ -76,9 +80,7 @@ async def _handle_join(
         first_name=tg_user.first_name,
         last_name=tg_user.last_name,
     )
-    await UserRepo.set_member(
-        session, tg_user.id, is_member=True, joined_at=now
-    )
+    await UserRepo.set_member(session, tg_user.id, is_member=True, joined_at=now)
 
     # Check if user already has an intro (don't overwrite)
     existing_intro = await IntroRepo.get(session, tg_user.id)
@@ -111,11 +113,7 @@ async def _handle_join(
         # Post message in chat only on first kick
         if first_kick:
             mention = mention_for(tg_user)
-            bot_ref = (
-                f"@{settings.WEB_BOT_USERNAME}"
-                if settings.WEB_BOT_USERNAME
-                else "the bot"
-            )
+            bot_ref = f"@{settings.WEB_BOT_USERNAME}" if settings.WEB_BOT_USERNAME else "the bot"
             try:
                 await event.bot.send_message(
                     chat_id=chat_id,
@@ -142,9 +140,7 @@ async def _handle_join(
         return
 
     if active_app is not None:
-        await ApplicationRepo.update_status(
-            session, active_app.id, "added", added_at=now
-        )
+        await ApplicationRepo.update_status(session, active_app.id, "added", added_at=now)
 
         # Build and save intro
         answers = await QuestionnaireRepo.get_answers(
@@ -179,9 +175,7 @@ async def _handle_join(
                     text=header + intro_text,
                 )
             except Exception:
-                logger.exception(
-                    "Failed to post intro for user %s", tg_user.id
-                )
+                logger.exception("Failed to post intro for user %s", tg_user.id)
 
 
 @router.message(F.new_chat_members)
@@ -212,6 +206,4 @@ async def _handle_leave(
 ) -> None:
     now = datetime.now(timezone.utc)
 
-    await UserRepo.set_member(
-        session, tg_user.id, is_member=False, left_at=now
-    )
+    await UserRepo.set_member(session, tg_user.id, is_member=False, left_at=now)

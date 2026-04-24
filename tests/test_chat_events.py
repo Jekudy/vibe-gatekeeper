@@ -13,6 +13,7 @@ The full aiogram ChatMemberUpdated dispatch (which requires a real Dispatcher)
 is not tested; instead, we call the handler coroutines directly with minimal
 MagicMock event objects.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -124,9 +125,7 @@ class TestHandleLeave:
 
                 from sqlalchemy import select
 
-                result = await session.execute(
-                    select(User).where(User.id == 6002)
-                )
+                result = await session.execute(select(User).where(User.id == 6002))
                 u = result.scalar_one()
                 assert u.left_at is not None
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Scan 📟 folder (all unread private chats) for unanswered messages."""
+
 import asyncio
 import os
 from telethon import TelegramClient
@@ -48,13 +49,15 @@ async def main():
             text = (m.text or "(медиа)")[:100]
             context.append(f"  [{sender}]: {text}")
 
-        unread_chats.append({
-            "name": name,
-            "username": username,
-            "unread": dialog.unread_count,
-            "last_from_me": last_from_me,
-            "context": context,
-        })
+        unread_chats.append(
+            {
+                "name": name,
+                "username": username,
+                "unread": dialog.unread_count,
+                "last_from_me": last_from_me,
+                "context": context,
+            }
+        )
 
     # Sort: unanswered first
     unread_chats.sort(key=lambda c: (c["last_from_me"], -c["unread"]))

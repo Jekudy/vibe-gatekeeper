@@ -9,10 +9,12 @@ Tests cover:
 datetime.now() is controlled via backdating inserted DB rows rather than
 monkeypatching (avoids patching internals we don't own; more robust).
 """
+
 from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+
 
 def _run(coro):
     return asyncio.run(coro)
@@ -44,9 +46,7 @@ class TestIntroExpiryDetection:
                 # Back-date updated_at to 91 days ago
                 old_ts = datetime.now(timezone.utc) - timedelta(days=91)
                 await session.execute(
-                    update(Intro)
-                    .where(Intro.user_id == 5001)
-                    .values(updated_at=old_ts)
+                    update(Intro).where(Intro.user_id == 5001).values(updated_at=old_ts)
                 )
                 await session.commit()
 
@@ -77,9 +77,7 @@ class TestIntroExpiryDetection:
 
                 recent_ts = datetime.now(timezone.utc) - timedelta(days=30)
                 await session.execute(
-                    update(Intro)
-                    .where(Intro.user_id == 5002)
-                    .values(updated_at=recent_ts)
+                    update(Intro).where(Intro.user_id == 5002).values(updated_at=recent_ts)
                 )
                 await session.commit()
 

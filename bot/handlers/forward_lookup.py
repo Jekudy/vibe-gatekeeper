@@ -53,11 +53,7 @@ async def handle_forwarded_message(
     intro = await IntroRepo.get(session, user.id)
     if intro is not None:
         await message.answer(
-            FORWARD_INTRO_RESULT.format(
-                name=name, username=username, intro_text=intro.intro_text
-            )
+            FORWARD_INTRO_RESULT.format(name=name, username=username, intro_text=intro.intro_text)
         )
     else:
-        await message.answer(
-            FORWARD_NO_INTRO.format(name=name, username=username)
-        )
+        await message.answer(FORWARD_NO_INTRO.format(name=name, username=username))

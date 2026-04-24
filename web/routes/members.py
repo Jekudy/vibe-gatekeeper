@@ -59,9 +59,7 @@ async def members(
     voucher_ids = set(vouch_map.values())
     voucher_names: dict[int, str] = {}
     if voucher_ids:
-        vouchers_q = await session.execute(
-            select(User).where(User.id.in_(voucher_ids))
-        )
+        vouchers_q = await session.execute(select(User).where(User.id.in_(voucher_ids)))
         for v in vouchers_q.scalars():
             display = v.first_name
             if v.last_name:

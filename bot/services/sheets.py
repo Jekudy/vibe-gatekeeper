@@ -35,13 +35,13 @@ HEADERS = [
 # Maps question_index (0-6) to sheet column index (0-based within HEADERS).
 # question 0 = Имя (col 2), question 1 = Локация (col 3), etc.
 _Q_INDEX_TO_COL = {
-    0: 2,   # Имя
-    1: 3,   # Локация
-    2: 4,   # Откуда узнал
-    3: 5,   # Опыт
-    4: 6,   # Проекты
-    5: 7,   # Самое сложное
-    6: 8,   # Цели
+    0: 2,  # Имя
+    1: 3,  # Локация
+    2: 4,  # Откуда узнал
+    3: 5,  # Опыт
+    4: 6,  # Проекты
+    5: 7,  # Самое сложное
+    6: 8,  # Цели
 }
 
 
@@ -83,9 +83,7 @@ def _get_sheet() -> gspread.Worksheet | None:
         return None
 
 
-def _find_row_by_telegram_id(
-    worksheet: gspread.Worksheet, telegram_id: int
-) -> int | None:
+def _find_row_by_telegram_id(worksheet: gspread.Worksheet, telegram_id: int) -> int | None:
     """Return 1-based row number for the given Telegram ID, or None."""
     try:
         cell = worksheet.find(str(telegram_id), in_column=1)
@@ -115,7 +113,7 @@ def _sync_row_to_sheet(
     for q_idx, col_idx in _Q_INDEX_TO_COL.items():
         row_data[col_idx] = answers_by_index.get(q_idx, "")
     row_data[9] = vouched_by  # Кто поручился
-    row_data[10] = status      # Статус
+    row_data[10] = status  # Статус
 
     if row_num is not None:
         # Update existing row
@@ -169,9 +167,7 @@ async def sync_intro_to_sheet(
         if row_num is not None:
             # Store sheets_row_number back to DB
             async with async_session() as session:
-                result = await session.execute(
-                    select(Intro).where(Intro.user_id == user_id)
-                )
+                result = await session.execute(select(Intro).where(Intro.user_id == user_id))
                 intro = result.scalar_one_or_none()
                 if intro is not None:
                     intro.sheets_row_number = row_num
@@ -224,9 +220,7 @@ async def sync_all_from_sheet() -> None:
             sheet_hash = _row_content_hash(row)
 
             # Look up the local intro
-            result = await session.execute(
-                select(Intro).where(Intro.user_id == telegram_id)
-            )
+            result = await session.execute(select(Intro).where(Intro.user_id == telegram_id))
             intro = result.scalar_one_or_none()
 
             if intro is None:
@@ -241,10 +235,7 @@ async def sync_all_from_sheet() -> None:
                     QuestionnaireAnswer.is_current.is_(True),
                 )
             )
-            local_answers = {
-                qa.question_index: qa.answer_text
-                for qa in qa_result.scalars().all()
-            }
+            local_answers = {qa.question_index: qa.answer_text for qa in qa_result.scalars().all()}
             local_row_values = [""] * 7
             for q_idx in range(7):
                 local_row_values[q_idx] = local_answers.get(q_idx, "")
@@ -334,8 +325,7 @@ async def full_sync() -> None:
                 )
             )
             answers_by_index = {
-                qa.question_index: qa.answer_text
-                for qa in qa_result.scalars().all()
+                qa.question_index: qa.answer_text for qa in qa_result.scalars().all()
             }
 
         username = f"@{user.username}" if user.username else ""

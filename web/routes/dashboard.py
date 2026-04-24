@@ -25,9 +25,7 @@ async def dashboard(
 
     # Count by status
     status_counts_q = await session.execute(
-        select(Application.status, func.count(Application.id)).group_by(
-            Application.status
-        )
+        select(Application.status, func.count(Application.id)).group_by(Application.status)
     )
     status_counts = dict(status_counts_q.all())
 

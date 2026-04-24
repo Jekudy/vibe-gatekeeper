@@ -9,6 +9,7 @@ Three scenarios:
 - New-user row insert: worksheet.append_row called for new intro.
 - Existing-user row update: worksheet.update called for existing row.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -79,7 +80,9 @@ class TestStatusColumnWrite:
         ws.update.assert_called_once()
         call_args = ws.update.call_args
         # First positional arg: row data list; second: range string like 'A3:K3'
-        cell_range = call_args.args[1] if len(call_args.args) > 1 else call_args.kwargs.get("range_name", "")
+        cell_range = (
+            call_args.args[1] if len(call_args.args) > 1 else call_args.kwargs.get("range_name", "")
+        )
         assert "3" in str(cell_range)
         assert row_num == 3
 
@@ -120,7 +123,7 @@ class TestNewUserRowInsert:
         ws.update = MagicMock()
         ws.get_all_values.return_value = [
             ["Telegram ID", "Username"],  # header row
-            ["99998", "@existing"],       # 1 existing row
+            ["99998", "@existing"],  # 1 existing row
         ]
 
         sheets_mod._sync_row_to_sheet(

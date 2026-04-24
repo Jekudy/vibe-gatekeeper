@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Transcribe a Telegram voice message using Premium account's built-in transcription."""
+
 import asyncio
 import os
 import sys

@@ -6,10 +6,12 @@ VouchRepo / ApplicationRepo directly. The full aiogram CallbackQuery dispatch
 is not tested here (that would need a live Dispatcher + Bot mock setup);
 instead, we test the data integrity invariants that handle_vouch depends on.
 """
+
 from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+
 
 def _run(coro):
     return asyncio.run(coro)
@@ -126,7 +128,9 @@ class TestVouchApplicationStateTransition:
                 await ApplicationRepo.update_status(session, app.id, "pending")
                 # Denial path: status → rejected, no VouchLog
                 await ApplicationRepo.update_status(
-                    session, app.id, "rejected",
+                    session,
+                    app.id,
+                    "rejected",
                     rejected_at=datetime.now(timezone.utc),
                 )
                 await session.commit()
@@ -134,9 +138,7 @@ class TestVouchApplicationStateTransition:
                 refreshed = await ApplicationRepo.get(session, app.id)
                 assert refreshed.status == "rejected"
 
-                result = await session.execute(
-                    select(VouchLog).where(VouchLog.vouchee_id == 1004)
-                )
+                result = await session.execute(select(VouchLog).where(VouchLog.vouchee_id == 1004))
                 assert result.scalar_one_or_none() is None
 
         _run(_run_test())
@@ -159,9 +161,7 @@ class TestVouchApplicationStateTransition:
                 # Back-date created_at to 73 hours ago
                 old_ts = datetime.now(timezone.utc) - timedelta(hours=73)
                 await session.execute(
-                    update(Application)
-                    .where(Application.id == app.id)
-                    .values(created_at=old_ts)
+                    update(Application).where(Application.id == app.id).values(created_at=old_ts)
                 )
                 await session.commit()
 

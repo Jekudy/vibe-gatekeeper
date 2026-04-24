@@ -6,6 +6,7 @@ as well as the pure helper build_intro_preview(), rather than dispatching
 through the full aiogram Router (which requires a real Dispatcher + FSMContext
 setup outside the scope of a safety-net).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -36,8 +37,7 @@ class TestBuildIntroPreview:
         from bot.handlers.questionnaire import build_intro_preview
 
         answers = [
-            QuestionnaireAnswer(question_index=i, answer_text=f"answer{i}")
-            for i in range(7)
+            QuestionnaireAnswer(question_index=i, answer_text=f"answer{i}") for i in range(7)
         ]
         preview = build_intro_preview(answers)
         for i in range(7):
@@ -207,9 +207,7 @@ class TestQuestionnaireRepo:
                     )
                 await session.flush()
 
-                last_idx = await QuestionnaireRepo.get_last_answered_index(
-                    session, 400, app.id
-                )
+                last_idx = await QuestionnaireRepo.get_last_answered_index(session, 400, app.id)
                 assert last_idx == 3
 
         _run(_run_test())

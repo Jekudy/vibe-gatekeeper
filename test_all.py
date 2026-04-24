@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Automated end-to-end tests for the gatekeeper bot."""
+
 import asyncio
 import os
 import sys
@@ -70,7 +71,7 @@ async def test_questionnaire(client):
         if resp:
             last_id = resp.id
         if i < 6:
-            check(f"Q{i+1} → next question", resp is not None and "❓" in (resp.text or ""))
+            check(f"Q{i + 1} → next question", resp is not None and "❓" in (resp.text or ""))
         else:
             check("Q7 → confirm prompt", resp is not None and resp.reply_markup is not None)
 
@@ -103,11 +104,17 @@ async def test_confirm_and_post(client, confirm_msg):
 
     async with async_session() as s:
         result = await s.execute(
-            select(Application).where(Application.user_id == 5739636875).order_by(Application.id.desc()).limit(1)
+            select(Application)
+            .where(Application.user_id == 5739636875)
+            .order_by(Application.id.desc())
+            .limit(1)
         )
         app = result.scalar_one_or_none()
         check("application status = pending", app is not None and app.status == "pending")
-        check("questionnaire_message_id set", app is not None and app.questionnaire_message_id is not None)
+        check(
+            "questionnaire_message_id set",
+            app is not None and app.questionnaire_message_id is not None,
+        )
 
 
 async def test_vouch_deadline(client):
@@ -119,7 +126,9 @@ async def test_vouch_deadline(client):
 
     async with async_session() as s:
         result = await s.execute(
-            select(Application).where(Application.user_id == 5739636875, Application.status == "pending")
+            select(Application).where(
+                Application.user_id == 5739636875, Application.status == "pending"
+            )
         )
         app = result.scalar_one_or_none()
         check("pending application exists", app is not None)
@@ -144,12 +153,15 @@ async def test_refresh(client):
     resp = await wait_for_response(client, last_id)
     check("/refresh responds", resp is not None)
     if resp:
-        check("/refresh starts questionnaire", "❓" in (resp.text or "") or "обновить" in (resp.text or "").lower())
+        check(
+            "/refresh starts questionnaire",
+            "❓" in (resp.text or "") or "обновить" in (resp.text or "").lower(),
+        )
         last_id = resp.id
 
         # Answer all 7 questions
         for i in range(7):
-            await client.send_message(BOT, f"Обновлённый ответ {i+1}")
+            await client.send_message(BOT, f"Обновлённый ответ {i + 1}")
             resp = await wait_for_response(client, last_id)
             if resp:
                 last_id = resp.id
@@ -161,13 +173,20 @@ async def test_refresh(client):
             # Check intro was updated
             async with async_session() as s:
                 intro = await IntroRepo.get(s, 5739636875)
-                check("intro updated after refresh", intro is not None and "Обновлённый" in (intro.intro_text or ""))
-                check("vouched_by preserved", intro is not None and intro.vouched_by_name == "test voucher")
+                check(
+                    "intro updated after refresh",
+                    intro is not None and "Обновлённый" in (intro.intro_text or ""),
+                )
+                check(
+                    "vouched_by preserved",
+                    intro is not None and intro.vouched_by_name == "test voucher",
+                )
 
     # Reset member status for next tests
     async with async_session() as s:
         await UserRepo.set_member(s, 5739636875, is_member=False)
         from bot.db.repos.intro import IntroRepo as IR
+
         await IR.delete(s, 5739636875)
         await s.commit()
 
@@ -177,10 +196,12 @@ async def test_sheets_sync():
     print("\n📊 Test 5: Google Sheets sync")
     try:
         from bot.services.sheets import _is_configured
+
         check("sheets configured", _is_configured())
 
         if _is_configured():
             from bot.services.sheets import full_sync
+
             await full_sync()
             check("full_sync runs without error", True)
     except Exception as e:
@@ -210,7 +231,7 @@ async def main():
 
     await client.disconnect()
 
-    print(f"\n{'='*40}")
+    print(f"\n{'=' * 40}")
     print(f"Results: {PASS} passed, {FAIL} failed")
     if FAIL > 0:
         sys.exit(1)
