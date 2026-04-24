@@ -25,6 +25,7 @@ vibe-gatekeeper/
 │   │       ├── user.py
 │   │       ├── questionnaire.py
 │   │       ├── vouch.py
+│   │       ├── intro.py
 │   │       ├── message.py
 │   │       └── application.py
 │   ├── services/
@@ -38,6 +39,7 @@ vibe-gatekeeper/
 │   │   ├── questionnaire.py     # FSM for 7 questions
 │   │   ├── vouch.py             # "Ручаюсь" callback
 │   │   ├── admin.py             # /chatid, /stats
+│   │   ├── chat_events.py       # join/leave chat member events
 │   │   ├── forward_lookup.py    # forwarded message → intro
 │   │   └── chat_messages.py     # save all group messages
 │   ├── keyboards/
@@ -72,10 +74,17 @@ vibe-gatekeeper/
 │       └── style.css
 ├── tests/
 │   ├── conftest.py
+│   ├── test_settings.py
+│   ├── test_web_app.py
+│   ├── test_web_auth.py
 │   ├── test_questionnaire.py
 │   ├── test_vouch.py
-│   ├── test_sheets.py
-│   └── test_scheduler.py
+│   ├── test_intro_refresh.py
+│   ├── test_scheduler.py
+│   ├── test_sheets_sync.py
+│   ├── test_chat_events.py
+│   ├── test_display_name.py
+│   └── test_login_rate_limit.py
 └── pyproject.toml
 ```
 
@@ -281,6 +290,8 @@ For each member with intro older than 90 days:
 ## 7. Web Interface
 
 ### Auth: Telegram Login Widget → HMAC-SHA256 verification → signed cookie
+
+*Note: implementation differs — see code in `web/auth.py`.*
 ### Routes:
 - GET /login — Telegram widget
 - GET /dashboard — funnel stats
