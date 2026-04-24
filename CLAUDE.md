@@ -12,16 +12,18 @@ bot/          34 .py, ~2,700 LOC — Telegram bot (aiogram 3)
   handlers/       7 routers: start, questionnaire, vouch, admin, chat_events, forward_lookup, chat_messages
   db/models.py    SQLAlchemy 2 DeclarativeBase (148 LOC)
   db/repos/       6 repositories: user, application, questionnaire, vouch, intro, message
-  services/       scheduler.py (229), sheets.py (431 — largest file), invite.py (47)
+  services/       scheduler.py, sheets.py (largest file), invite.py
+  utils/          telegram.py — mention_for() utility
   middlewares/db_session.py   injects AsyncSession per aiogram update
   keyboards/ filters/ states/ texts.py
-web/          14 files (9 .py + 4 .html + 1 .css), ~598 LOC — FastAPI admin
+web/          15 files (10 .py + 4 .html + 1 .css) — FastAPI admin
   app.py          create_app factory + HTTP auth middleware
   auth.py         WEB_PASSWORD compare + itsdangerous cookie signer
+  dependencies.py get_session() FastAPI Depends helper
   routes/         auth, dashboard, members
   templates/      base, login, dashboard, members (Bootstrap 5 CDN, no build step)
 alembic/      3 .py, 205 LOC — migrations; single revision in 001_initial.py
-tests/        4 .py, 97 LOC — pytest collects 4 tests
+tests/        9 .py, 46 tests — pytest collects from tests/ only
 docs/         runbook.md (authoritative ops), ops/, superpowers/plans+specs, superflow/
 ```
 
@@ -36,12 +38,10 @@ pip install -e ".[dev]"            # dev extras: pytest, ruff
 python -m bot                      # Telegram bot (long polling)
 python -m web                      # FastAPI on 0.0.0.0:8080 via uvicorn
 
-# Tests + lint (exactly what CI runs — see .github/workflows/ci.yml:37,40)
-pytest -q                          # collects 4 tests from tests/ only
-ruff check .                       # 0 violations as of 2026-04-24
-
-# Format (NOT enforced in CI; 26/55 files would be reformatted)
-ruff format --check .
+# Tests + lint + format (exactly what CI runs — see .github/workflows/ci.yml)
+pytest -q                          # collects 46 tests from tests/ only
+ruff check .                       # lint
+ruff format --check .              # format (enforced in CI since sprint-1)
 
 # Migrations
 alembic revision --autogenerate -m "describe change"
@@ -71,7 +71,7 @@ Prereqs: `DATABASE_URL`, `BOT_TOKEN`, `WEB_PASSWORD` and ~9 other env vars. See 
 ## Known drift (keep in mind when reading docs)
 
 - **`SPEC.md:283` (§7) is wrong** — describes a Telegram Login Widget + HMAC-SHA256 for web auth. Actual implementation is a password form + `itsdangerous.URLSafeTimedSerializer` cookie (`web/auth.py`, `web/routes/auth.py`). No Widget code exists.
-- **`SPEC.md:75-78` (§1) is aspirational** — lists `test_questionnaire.py`, `test_vouch.py`, `test_sheets.py`, `test_scheduler.py`. None exist. Real tests: `tests/test_settings.py`, `tests/test_web_app.py`, `tests/test_web_auth.py`, `tests/conftest.py`.
+- **`SPEC.md:75-78` (§1) test list is now partially correct** — `test_questionnaire.py`, `test_vouch.py`, `test_scheduler.py` exist (added in sprint-1); `test_sheets.py` does not (actual file is `test_sheets_sync.py`). Full test list: `tests/test_settings.py`, `tests/test_web_app.py`, `tests/test_web_auth.py`, `tests/test_questionnaire.py`, `tests/test_vouch.py`, `tests/test_scheduler.py`, `tests/test_sheets_sync.py`, `tests/test_chat_events.py`, `tests/test_intro_refresh.py`.
 - **`SPEC.md §1` structure diagram is outdated** — missing `bot/handlers/chat_events.py` and `bot/db/repos/intro.py`.
 - **`README.md:30-36` + preflight mention `uv`** — `uv` binary is on PATH but `uv.lock` is absent and CI uses `pip install -e ".[dev]"` (`.github/workflows/ci.yml:34`). Treat pip as current truth.
 - **Declared-but-unused deps** in `pyproject.toml:11,19,21`: `gspread-asyncio`, `httpx`, `python-dotenv` — zero imports in `bot/` or `web/`.
@@ -82,7 +82,9 @@ Prereqs: `DATABASE_URL`, `BOT_TOKEN`, `WEB_PASSWORD` and ~9 other env vars. See 
 - **GitHub is the source of truth; the VPS is not.** All changes flow local → PR → merge → CI → GHCR → Coolify. SSH to the VPS is for logs/diagnostics only.
 - **Never commit secrets.** `.env`, `.env.staging`, `.env.production`, `credentials.json` all gitignored; one live credential value already leaked into `docs/runbook.md:110` — rotate before the next commit touches that file (see `docs/superflow/project-health-report.md` P0 #1).
 - **`web` depends on `bot`, never the reverse.** `web/config.py`, `web/routes/dashboard.py`, `web/routes/members.py` import from `bot.db` and `bot.config`. There is no shared `core/` package yet — be careful renaming anything under `bot/db/`.
-- **Web routes currently open `async_session()` directly.** `web/routes/dashboard.py:18` and `web/routes/members.py:16` bypass the aiogram `DbSessionMiddleware`. Safe today because they are read-only. If you add a write endpoint, introduce a FastAPI DI session or you will skip commit/rollback.
+- **Web routes use `session: AsyncSession = Depends(get_session)` from `web/dependencies.py`.** Never open `async_session()` directly in route handlers — `get_session()` handles commit/rollback.
+- **Scheduler jobs use `_run_with_session()` helper** (`bot/services/scheduler.py`). Do not open `async_session()` directly in new scheduler jobs.
+- **`mention_for(user)` in `bot/utils/telegram.py`** — use for Telegram user mentions; handles username/first_name fallback. Works with both aiogram objects and SQLAlchemy models.
 - **DEV_MODE gates schema creation path.** `bot/__main__.py:22-29` calls `Base.metadata.create_all` when `DEV_MODE=true`; prod uses Alembic. Keep the models + migrations in sync manually.
 - **Migrations are baked into the bot container command** (`Dockerfile.bot:14` → `alembic upgrade head && python -m bot`). A bad migration = boot loop — tracked as P1 tech debt.
 - **All user-facing strings live in `bot/texts.py`** (133 LOC, Russian). Don't inline strings in handlers.
@@ -105,9 +107,7 @@ Prereqs: `DATABASE_URL`, `BOT_TOKEN`, `WEB_PASSWORD` and ~9 other env vars. See 
 | P1 | Weak config defaults (`changeme`, `admin`) in `bot/config.py:10-19` | `bot/config.py` |
 | P1 | Dockerfiles run as root | `Dockerfile.bot`, `Dockerfile.web` — no `USER` |
 | P1 | Migration in bot CMD → boot-loop on bad revision | `Dockerfile.bot:14` |
-| P1 | ~9% test coverage (4 tests / 48 source modules) | `tests/` |
+| P1 | ~20% test coverage (46 tests, core flows covered; db repos + sheets edge cases remain) | `tests/` |
 | P1 | Session cookie missing `Secure` flag, prod served over HTTP | `web/routes/auth.py:37-43` |
-| P2 | Formatter not enforced in CI (26/55 files would reformat) | `.github/workflows/ci.yml:40` |
-| P2 | Hardcoded `@vibeshkoder_bot` in kick message ignores `WEB_BOT_USERNAME` | `bot/handlers/chat_events.py:119` |
 
-<!-- updated-by-superflow:2026-04-24 -->
+<!-- updated-by-superflow:2026-04-25 -->

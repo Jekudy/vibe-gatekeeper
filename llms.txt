@@ -22,9 +22,10 @@ The bot is the primary service (aiogram 3 long polling). The web app is a thin F
 - [DB models](./bot/db/models.py): SQLAlchemy 2 `DeclarativeBase` — users, applications, intros, vouch_log, questionnaire_answers, chat_messages (148 LOC)
 - [DB engine](./bot/db/engine.py): async engine + `async_sessionmaker` (12 LOC)
 - [DB repos](./bot/db/repos/): 6 repository modules — user, application, questionnaire, vouch, intro, message (6 files, ~411 LOC)
-- [Sheets sync](./bot/services/sheets.py): `gspread` (sync) Google Sheets adapter; 5-min scheduler job (431 LOC — largest file)
-- [Scheduler](./bot/services/scheduler.py): APScheduler `AsyncIOScheduler` — vouch-deadline, intro-refresh, sheets-sync jobs (229 LOC)
+- [Sheets sync](./bot/services/sheets.py): `gspread` (sync) Google Sheets adapter; 5-min scheduler job (largest file)
+- [Scheduler](./bot/services/scheduler.py): APScheduler `AsyncIOScheduler` — vouch-deadline, intro-refresh, sheets-sync jobs; all jobs run via `_run_with_session()` helper
 - [Invite service](./bot/services/invite.py): one-time invite link generation (47 LOC)
+- [Telegram utils](./bot/utils/telegram.py): `mention_for(user)` — returns `@username` or first_name fallback; duck-typed, works with aiogram and SQLAlchemy user objects
 - [DB session middleware](./bot/middlewares/db_session.py): aiogram middleware injecting `AsyncSession` per update
 - [Texts](./bot/texts.py): All user-facing Russian strings, centralized (133 LOC)
 - [Filters](./bot/filters/chat_type.py): `ChatType` filter for private / group routing
@@ -37,8 +38,9 @@ The bot is the primary service (aiogram 3 long polling). The web app is a thin F
 - [Web factory](./web/app.py): `create_app` — FastAPI instance, auth middleware (redirects unauth to `/login`), mounts `/static`, includes 3 routers (58 LOC)
 - [Auth](./web/auth.py): Password + `itsdangerous.URLSafeTimedSerializer` cookie signer (34 LOC — NOTE: `SPEC.md §7` incorrectly describes a Telegram Login Widget; actual is password form)
 - [Login route](./web/routes/auth.py): GET/POST `/login`, cookie set (51 LOC)
-- [Dashboard](./web/routes/dashboard.py): Funnel stats — applications by status (48 LOC)
-- [Members](./web/routes/members.py): Member list + name search (96 LOC)
+- [Web session DI](./web/dependencies.py): `get_session()` FastAPI Depends helper — yields `AsyncSession` with commit/rollback lifecycle; used by all route handlers
+- [Dashboard](./web/routes/dashboard.py): Funnel stats — applications by status; uses `Depends(get_session)`
+- [Members](./web/routes/members.py): Member list + name search; uses `Depends(get_session)`
 - [Web config](./web/config.py): Re-uses `bot.config.settings` (3 LOC — duplicate instantiation is a known smell)
 - [Templates](./web/templates/): 4 Jinja2 templates — base, login, dashboard, members (HTML + Bootstrap 5 CDN, no build step)
 - [Static](./web/static/style.css): Minimal overrides on top of Bootstrap CDN
@@ -52,10 +54,19 @@ The bot is the primary service (aiogram 3 long polling). The web app is a thin F
 
 ## Testing
 
-- [Tests dir](./tests/): 4 test files, 97 LOC total — conftest, test_settings, test_web_app, test_web_auth (pytest collects 4 tests)
-- [conftest](./tests/conftest.py): `app_env` fixture + `import_module` helper
+- [Tests dir](./tests/): 9 test files, 46 tests total — pytest collects from `tests/` only
+- [conftest](./tests/conftest.py): fixtures — `app_env` (env monkeypatch), `session_factory_sqlite` (in-memory SQLite async sessionmaker), `aiogram_bot_mock` (AsyncMock Bot), `chat_member_factory`, `message_factory`, `callback_query_factory`
+- [test_chat_events](./tests/test_chat_events.py): 11 tests — join/leave handler logic and DB side-effects
+- [test_intro_refresh](./tests/test_intro_refresh.py): 5 tests — intro refresh scheduler job
+- [test_questionnaire](./tests/test_questionnaire.py): 7 tests — FSM onboarding flow
+- [test_scheduler](./tests/test_scheduler.py): 7 tests — vouch-deadline and sheets-sync jobs
+- [test_sheets_sync](./tests/test_sheets_sync.py): 6 tests — Google Sheets sync logic
+- [test_vouch](./tests/test_vouch.py): 6 tests — vouch callback and race protection
+- [test_settings](./tests/test_settings.py): 1 test — config/settings loading
+- [test_web_app](./tests/test_web_app.py): 1 test — FastAPI app factory
+- [test_web_auth](./tests/test_web_auth.py): 2 tests — web auth flow
 - Run: `pytest -q` (testpaths pinned to `tests/` in pyproject — root-level `test_*.py` files are NOT collected)
-- Coverage: 4 tests against ~48 source modules; 29 modules have zero direct tests. Prioritize adding tests for vouch/scheduler/sheets.
+- Note: `pytest-asyncio` is not in dev deps; async code in tests is wrapped in `asyncio.run()` inside sync test functions
 
 ## Configuration
 
@@ -69,7 +80,7 @@ The bot is the primary service (aiogram 3 long polling). The web app is a thin F
 
 ## Infrastructure
 
-- [CI](./.github/workflows/ci.yml): `pytest -q` + `ruff check .` on PR and push to main/master (40 LOC)
+- [CI](./.github/workflows/ci.yml): `pytest -q` + `ruff check .` + `ruff format --check .` on PR and push to main/master (44 LOC)
 - [Release](./.github/workflows/release.yml): Triggered on successful CI on main; builds `Dockerfile.bot` + `Dockerfile.web`, pushes `sha-<hash>` + `:main` tags to `ghcr.io/jekudy/vibe-gatekeeper-{bot,web}` (67 LOC)
 - Deploy target: Coolify (watches `:main`); prod cutover completed 2026-04-20 — see `docs/runbook.md`
 - [.gitignore](./.gitignore): Covers `.env`, `.venv`, caches, `.worktrees/`, build artifacts
@@ -96,4 +107,4 @@ The bot is the primary service (aiogram 3 long polling). The web app is a thin F
   - [`test_flow.py`](./test_flow.py): Manual Telethon flow script (84 LOC)
   - All five require the `[ops]` extra (`telethon>=1.39`) from `pyproject.toml:32`
 
-<!-- updated-by-superflow:2026-04-24 -->
+<!-- updated-by-superflow:2026-04-25 -->
