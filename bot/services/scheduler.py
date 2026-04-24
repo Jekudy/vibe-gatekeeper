@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -207,6 +208,11 @@ async def sync_google_sheets() -> None:
     await _run_with_session(_sync_google_sheets_impl)
 
 
+async def _touch_heartbeat() -> None:
+    """Update /tmp/bot-heartbeat timestamp so the Docker HEALTHCHECK can verify liveness."""
+    Path("/tmp/bot-heartbeat").touch()
+
+
 def start_scheduler(bot: Bot) -> None:
     """Configure and start the scheduler."""
     scheduler.add_job(
@@ -231,6 +237,13 @@ def start_scheduler(bot: Bot) -> None:
         "interval",
         minutes=5,
         id="sync_google_sheets",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _touch_heartbeat,
+        "interval",
+        seconds=30,
+        id="heartbeat",
         replace_existing=True,
     )
     scheduler.start()

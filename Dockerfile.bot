@@ -1,14 +1,23 @@
-FROM python:3.12-slim
+# Builder stage: compile dependencies
+FROM python:3.12-slim AS builder
+WORKDIR /build
+RUN apt-get update && apt-get install -y --no-install-recommends gcc build-essential && rm -rf /var/lib/apt/lists/*
+COPY pyproject.toml ./
+RUN pip install --prefix=/install --no-cache-dir -e .
 
+# Runtime stage: minimal image with non-root user
+FROM python:3.12-slim
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
+RUN groupadd --system app && useradd --system --gid app --home /app app
+COPY --from=builder /install /usr/local
+COPY --chown=app:app . .
+USER app
 
-# Install dependencies and app code
-COPY pyproject.toml .
-COPY bot/ bot/
-COPY alembic/ alembic/
-COPY alembic.ini .
-RUN pip install --no-cache-dir .
+# Verify bot heartbeat file is updated every 30 s (via APScheduler job).
+# A stale or missing file after 2 minutes (120 s) means the bot is unhealthy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD test -f /tmp/bot-heartbeat && test $(($(date +%s) - $(stat -c %Y /tmp/bot-heartbeat))) -lt 120 || exit 1
 
 CMD ["sh", "-c", "alembic upgrade head && python -m bot"]
