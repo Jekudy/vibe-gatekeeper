@@ -101,6 +101,7 @@ Sprint-2 env vars (all optional, commented out in `.env.example`):
 - `SPEC.md` — product intent **with caveats** above. Use as a requirements hint, verify against code.
 - `bot/__main__.py` + `web/app.py` — entry points; two-paragraph read to orient on any new task.
 - `.github/workflows/ci.yml` + `release.yml` — authoritative on what checks run and how images ship.
+- `docs/ai-memory-layer-proposal.md` — blueprint for owner's AI memory/digest/wiki layer; deferred, cherry-pickable design.
 
 ## Known issues / tech debt (top items — full list in health report)
 

@@ -98,6 +98,7 @@ The bot is the primary service (aiogram 3 long polling). The web app is a thin F
 - [Knowledge-layer plan](./docs/superpowers/plans/2026-04-19-coolify-knowledge-layer.md): Implementation plan (1,214 LOC)
 - [Knowledge-layer design](./docs/superpowers/specs/2026-04-19-coolify-knowledge-layer-design.md): Knowledge-layer spec (301 LOC)
 - [Project Health Report](./docs/superflow/project-health-report.md): Phase 0 Superflow audit — 45 findings across architecture / security / docs / devops
+- [AI Memory Layer Proposal](./docs/ai-memory-layer-proposal.md): Blueprint for AI memory/digest/wiki engagement layer — deferred to owner, cherry-pickable design (224 LOC)
 
 ## Optional
 
