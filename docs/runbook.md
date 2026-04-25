@@ -133,3 +133,26 @@ cd /home/claw/vibe-gatekeeper && docker compose up -d
 ```
 
 Legacy `docker-compose.yml`, `.env`, and `credentials.json` are preserved in `/home/claw/vibe-gatekeeper` — do not delete until prod has run stably for 7+ days.
+
+## Coolify deploys
+
+Canonical reference: `~/Vibe/knowledge/nocoders/docs/architecture/coolify-deploy-playbook.md` plus `/coolify-deploy` skill.
+
+- **Start app:** Coolify UI → project → app → Start. CLI: `coolify start <app-uuid>` (if `coolify` CLI available on host) or `docker start <container-uuid>` as fallback.
+- **Stop app:** Coolify UI → Stop, or `coolify stop <app-uuid>`.
+- **Pull logs (last 500 lines, follow):** `coolify logs <app-uuid> --tail 500 --follow`; fallback `docker logs <container-uuid> --tail 500`.
+- **Where secrets live:** Coolify env panel per app. On disk: `/data/coolify/...` (ACL 600 root:root). Never commit to git.
+- **Rollback to previous digest:** Coolify UI → app → Deployments → select previous deployment → Redeploy. CLI path: update image reference in app config to the prior `@sha256:` digest, redeploy.
+
+## Known Issues & Quirks
+
+_Filled incrementally as Coolify migration reveals issues. Each entry format:_
+
+```
+### <YYYY-MM-DD> — <short issue>
+Symptom:
+Root cause:
+Fix:
+```
+
+
