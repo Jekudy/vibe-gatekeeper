@@ -6,6 +6,7 @@ from aiogram import F, Router
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.config import settings
 from bot.db.repos.intro import IntroRepo
 from bot.db.repos.message import MessageRepo
 from bot.db.repos.user import UserRepo
@@ -28,6 +29,25 @@ async def handle_forwarded_message(
     session: AsyncSession,
 ) -> None:
     """Handle forwarded messages in private chat — look up author's intro."""
+
+    if message.from_user is None:
+        return
+
+    requester = await UserRepo.get(session, message.from_user.id)
+    if requester is None:
+        logger.info(
+            "forward_lookup denied for non-member user_id=%s",
+            message.from_user.id,
+        )
+        return
+
+    is_admin = requester.id in settings.ADMIN_IDS or requester.is_admin is True
+    if requester.is_member is not True and not is_admin:
+        logger.info(
+            "forward_lookup denied for non-member user_id=%s",
+            message.from_user.id,
+        )
+        return
 
     text = message.text
     if not text:
