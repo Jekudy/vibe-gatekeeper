@@ -39,22 +39,17 @@ async def save_chat_message(
     await UserRepo.set_member(session, message.from_user.id, is_member=True)
     logger.info("Marked user %s as member from chat message", message.from_user.id)
 
-    try:
-        await MessageRepo.save(
-            session,
-            message_id=message.message_id,
-            chat_id=message.chat.id,
-            user_id=message.from_user.id,
-            text=message.text,
-            date=message.date,
-            raw_json=message.model_dump(mode="json", exclude_none=True)
-            if message.text
-            else None,
-        )
-    except Exception:
-        await session.rollback()
-        logger.debug(
-            "Failed to save message %s in chat %s, skipping",
-            message.message_id,
-            message.chat.id,
-        )
+    # MessageRepo.save is idempotent on (chat_id, message_id) per T0-03 — duplicates
+    # return the existing row instead of raising. No need for a try/except + rollback
+    # that would also discard the UserRepo.upsert and set_member work above.
+    await MessageRepo.save(
+        session,
+        message_id=message.message_id,
+        chat_id=message.chat.id,
+        user_id=message.from_user.id,
+        text=message.text,
+        date=message.date,
+        raw_json=message.model_dump(mode="json", exclude_none=True)
+        if message.text
+        else None,
+    )
