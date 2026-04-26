@@ -147,3 +147,39 @@ class VouchLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=func.now(), server_default=func.now()
     )
+
+
+class FeatureFlag(Base):
+    """Persistent rollout flag for memory surfaces (T1-01).
+
+    Logical key: ``(flag_key, scope_type, scope_id)``. Global flags use ``scope_type=None``
+    and ``scope_id=None``. Per-chat / per-user flags pin a non-null scope.
+
+    All ``memory.*`` flag keys default to OFF — the migration does not seed any rows, and
+    ``FeatureFlagRepo.get`` returns ``False`` for missing flags. Operators enable flags
+    explicitly via SQL until an admin UI lands in a later phase.
+    """
+
+    __tablename__ = "feature_flags"
+    __table_args__ = (
+        Index("ix_feature_flags_enabled", "enabled"),
+        # Unique on the logical key. Postgres treats NULLs as distinct, so global rows
+        # (both scope columns NULL) coexist with per-scope rows.
+        # Constraint name matches the migration.
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    flag_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    scope_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    scope_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    config_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=func.now(), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=func.now(), server_default=func.now(), onupdate=func.now()
+    )

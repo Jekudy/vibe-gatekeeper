@@ -37,7 +37,7 @@
 
 | Ticket | Title                                                       | Status         | Notes |
 |--------|-------------------------------------------------------------|----------------|-------|
-| T1-01  | feature_flags table/repo                                    | not started    |
+| T1-01  | feature_flags table/repo                                    | done           | Sprint 6 / PR #TBD. Alembic migration `003_add_feature_flags` (id pk, flag_key non-null, scope_type/scope_id nullable, enabled bool default false, config_json, updated_by, created_at/updated_at; unique `(flag_key, scope_type, scope_id)`; index on `enabled`). New `bot/db/models.py::FeatureFlag` + `bot/db/repos/feature_flag.py::FeatureFlagRepo` with `get(flag_key, scope_type, scope_id) -> bool` (missing → False) and `set_enabled(...)` upsert helper. Migration intentionally seeds NO rows — all `memory.*` flags default OFF. Tests under `tests/db/test_feature_flag_repo.py` (5 DB-backed + 1 metadata smoke) cover: missing-returns-false, set-creates-row, set-updates-no-duplicate, per-scope coexists with global, no-seed-rows invariant, model registered in metadata. |
 | T1-02  | ingestion_runs table                                        | not started    |
 | T1-03  | telegram_updates table                                      | not started    |
 | T1-04  | raw update persistence service                              | not started    |
