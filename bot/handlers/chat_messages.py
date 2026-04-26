@@ -28,7 +28,7 @@ async def save_chat_message(
     if message.from_user is None:
         return
 
-    # Upsert user and mark as member (if they're writing in the chat, they're a member)
+    # Keep sender profile fresh for message attribution and admin lookups.
     await UserRepo.upsert(
         session,
         telegram_id=message.from_user.id,
@@ -36,8 +36,6 @@ async def save_chat_message(
         first_name=message.from_user.first_name,
         last_name=message.from_user.last_name,
     )
-    await UserRepo.set_member(session, message.from_user.id, is_member=True)
-    logger.info("Marked user %s as member from chat message", message.from_user.id)
 
     try:
         await MessageRepo.save(
