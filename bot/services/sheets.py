@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import threading
+import time
 from datetime import datetime, timezone
-from functools import lru_cache
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -18,6 +19,7 @@ from bot.html_escape import html_escape
 logger = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+_CLIENT_TTL_SECONDS = 300
 
 HEADERS = [
     "Telegram ID",
@@ -50,20 +52,46 @@ def _is_configured() -> bool:
     return bool(settings.GOOGLE_SHEETS_CREDS_FILE and settings.GOOGLE_SHEET_ID)
 
 
-@lru_cache(maxsize=1)
+_client: gspread.Client | None = None
+_client_ts = 0.0
+_client_checked = False
+_client_configured = False
+_client_lock = threading.Lock()
+
+
 def _get_client() -> gspread.Client | None:
-    """Return a cached gspread client, or None if credentials are not configured."""
-    if not _is_configured():
-        logger.debug("Google Sheets credentials not configured — skipping.")
-        return None
-    try:
-        creds = Credentials.from_service_account_file(
-            settings.GOOGLE_SHEETS_CREDS_FILE, scopes=SCOPES
-        )
-        return gspread.authorize(creds)
-    except Exception:
-        logger.exception("Failed to create Google Sheets client")
-        return None
+    """Return a TTL-cached gspread client, or None if credentials are not configured."""
+    global _client, _client_checked, _client_configured, _client_ts
+
+    now = time.monotonic()
+    with _client_lock:
+        configured = _is_configured()
+        if not configured:
+            _client = None
+            _client_ts = now
+            _client_checked = True
+            _client_configured = False
+            logger.debug("Google Sheets credentials not configured — skipping.")
+            return None
+
+        cache_expired = now - _client_ts > _CLIENT_TTL_SECONDS
+        should_refresh = not _client_checked or not _client_configured or cache_expired
+        if not should_refresh:
+            return _client
+
+        try:
+            creds = Credentials.from_service_account_file(
+                settings.GOOGLE_SHEETS_CREDS_FILE, scopes=SCOPES
+            )
+            _client = gspread.authorize(creds)
+        except Exception:
+            logger.exception("Failed to create Google Sheets client")
+            _client = None
+
+        _client_ts = now
+        _client_checked = True
+        _client_configured = True
+        return _client
 
 
 def _get_sheet() -> gspread.Worksheet | None:
