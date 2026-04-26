@@ -22,7 +22,8 @@ class Settings(BaseSettings):
     INTRO_REFRESH_DAYS: int = 90
     WEB_PASSWORD: str | None = None
     WEB_SESSION_SECRET: str | None = None
-    DEV_MODE: bool = False  # Use SQLite + MemoryStorage for local testing
+    DEV_MODE: bool = False  # Permissive checks (e.g. ephemeral web password / session secret).
+    # Note: postgres is required regardless of DEV_MODE (T0-02). See docs/memory-system/DEV_SETUP.md.
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
