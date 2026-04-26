@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -194,3 +195,53 @@ class FeatureFlag(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=func.now(), server_default=func.now(), onupdate=func.now()
     )
+
+
+class IngestionRun(Base):
+    """Tracks one ingestion run (T1-02).
+
+    Every ``telegram_updates`` / ``chat_messages`` row written during a run carries the
+    run's id (added in later tickets). One long-lived ``run_type='live'`` row exists per
+    bot process; ``run_type='import'`` rows are created per Telegram Desktop import (T2-01
+    dry-run / T2-03 apply). ``run_type='dry_run'`` for import dry-runs.
+
+    Status lifecycle: running → completed | failed | cancelled. Dry-runs may use
+    ``status='dry_run'`` as a terminal state to make filter queries explicit.
+    """
+
+    __tablename__ = "ingestion_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "run_type IN ('live','import','dry_run','cancelled')",
+            name="ck_ingestion_runs_run_type",
+        ),
+        CheckConstraint(
+            "status IN ('running','completed','failed','dry_run','cancelled')",
+            name="ck_ingestion_runs_status",
+        ),
+        Index(
+            "ix_ingestion_runs_run_type_started_at",
+            "run_type",
+            "started_at",
+        ),
+        Index("ix_ingestion_runs_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=func.now(), server_default=func.now(), nullable=False
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="running",
+        server_default="running",
+    )
+    stats_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    config_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
