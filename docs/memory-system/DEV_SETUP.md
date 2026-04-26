@@ -34,6 +34,19 @@ python -m bot
 Logs go to stdout. Keep this in one terminal; in another terminal do `psql` or `docker exec` to
 inspect tables.
 
+## Running the regression suite
+
+The regression umbrella `tests/regression/test_gatekeeper_safety.py` covers all Phase 0
+invariants in one file (T0-01..T0-05). Run it standalone for a fast smoke check before
+opening a PR that touches `bot/handlers/`, `bot/db/`, `bot/services/`, or `web/`:
+
+```bash
+pytest tests/regression/ -v
+```
+
+The DB-backed regression tests skip cleanly without a local postgres; CI runs them all
+against the postgres service container.
+
 ## Inspect dev DB
 
 ```bash

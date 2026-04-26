@@ -31,14 +31,16 @@ from sqlalchemy import select
 
 from tests.conftest import import_module
 
-pytest_plugins: list[str] = []
-
 
 def _random_id() -> int:
     return random.randint(900_000_000, 999_999_999)
 
 
 # ─── T0-01: forward_lookup membership / admin guard ───────────────────────────────────────
+#
+# Tests call the handler function directly (bypassing the aiogram router). The
+# ``F.forward_origin`` filter that gates the router is a routing concern, not a logic
+# concern; the handler's job is to enforce auth on whatever message it receives.
 
 def _forward_message(requester_id: int) -> SimpleNamespace:
     return SimpleNamespace(
@@ -59,21 +61,29 @@ def _user(id_: int, *, is_member: bool, is_admin: bool = False) -> SimpleNamespa
 
 
 async def test_regression_forward_lookup_non_member_denied(app_env, monkeypatch) -> None:
+    """Smoke: a *known* user with ``is_member=False`` and not an admin is denied silently.
+    The handler must NOT call ``message.answer``. Distinct from the unknown-user (UserRepo
+    returns None) path — this test asserts ``UserRepo.get`` was actually called and
+    returned a real user, so a regression that collapses the two silent-deny paths
+    (e.g., dropping the ``is_member`` check) would tripwire here."""
     handler = import_module("bot.handlers.forward_lookup")
     session = AsyncMock()
     message = _forward_message(requester_id=111)
 
-    user_get = AsyncMock(side_effect=[_user(111, is_member=False)])
+    user_get = AsyncMock(side_effect=[_user(111, is_member=False, is_admin=False)])
     monkeypatch.setattr(handler.UserRepo, "get", user_get)
     monkeypatch.setattr(handler, "settings", SimpleNamespace(ADMIN_IDS=set()))
 
     await handler.handle_forwarded_message(message, session)
 
-    # Non-member must get NO answer (silent deny) and the message lookup must NOT run.
-    message.answer.assert_not_called()
+    user_get.assert_awaited_once()  # confirms we hit the membership check (not the None-path)
+    message.answer.assert_not_called()  # silent deny, no info leakage
 
 
 async def test_regression_forward_lookup_admin_allowed(app_env, monkeypatch) -> None:
+    """Smoke: an admin (via ``is_admin=True`` DB flag) can run forward_lookup and receives
+    the intro response. The env-only ADMIN_IDS path is covered by T0-01-r1 and intentionally
+    not duplicated here."""
     handler = import_module("bot.handlers.forward_lookup")
     session = AsyncMock()
     message = _forward_message(requester_id=111)
@@ -93,44 +103,49 @@ async def test_regression_forward_lookup_admin_allowed(app_env, monkeypatch) -> 
 
     await handler.handle_forwarded_message(message, session)
 
-    # Admin must receive the intro response.
-    message.answer.assert_called_once()
+    message.answer.assert_called_once()  # admin received the intro response
 
 
 # ─── T0-02 + T0-03: DB round-trip and idempotency ─────────────────────────────────────────
 
 async def test_regression_user_repo_upsert_round_trips(db_session) -> None:
-    from bot.db.repos.user import UserRepo
+    """Smoke: insert then update via UserRepo.upsert; verify final state by fresh SELECT
+    + refresh (the upsert return value can be a stale identity-map cached instance when a
+    Python ref is held, which is exactly what would happen in real handler code)."""
     from bot.db.models import User
+    from bot.db.repos.user import UserRepo
 
     telegram_id = _random_id()
-    user = await UserRepo.upsert(
+
+    await UserRepo.upsert(
         db_session,
         telegram_id=telegram_id,
         username="probe",
         first_name="Probe",
         last_name=None,
     )
-    assert user.id == telegram_id
 
-    # Update path: same telegram_id, different fields.
-    updated = await UserRepo.upsert(
+    await UserRepo.upsert(
         db_session,
         telegram_id=telegram_id,
         username="probe2",
         first_name="Probe2",
         last_name="Last",
     )
-    assert updated.username == "probe2"
 
-    fetched = (await db_session.execute(select(User).where(User.id == telegram_id))).scalar_one()
+    fetched = (
+        await db_session.execute(select(User).where(User.id == telegram_id))
+    ).scalar_one()
+    await db_session.refresh(fetched)  # force read of latest column values from DB
     assert fetched.username == "probe2"
+    assert fetched.first_name == "Probe2"
+    assert fetched.last_name == "Last"
 
 
 async def test_regression_message_repo_save_duplicate_safe(db_session) -> None:
+    from bot.db.models import ChatMessage
     from bot.db.repos.message import MessageRepo
     from bot.db.repos.user import UserRepo
-    from bot.db.models import ChatMessage
 
     user_id = _random_id()
     chat_id = -1_000_000_000_000 - random.randint(0, 999_999)
@@ -146,18 +161,29 @@ async def test_regression_message_repo_save_duplicate_safe(db_session) -> None:
     )
 
     first = await MessageRepo.save(
-        db_session, message_id=message_id, chat_id=chat_id, user_id=user_id,
-        text="hello", date=when, raw_json=None,
+        db_session,
+        message_id=message_id,
+        chat_id=chat_id,
+        user_id=user_id,
+        text="hello",
+        date=when,
+        raw_json=None,
     )
     second = await MessageRepo.save(
-        db_session, message_id=message_id, chat_id=chat_id, user_id=user_id,
-        text="hello (dup)", date=when, raw_json=None,
+        db_session,
+        message_id=message_id,
+        chat_id=chat_id,
+        user_id=user_id,
+        text="hello (dup)",
+        date=when,
+        raw_json=None,
     )
 
     assert second.id == first.id
     rows = await db_session.execute(
         select(ChatMessage).where(
-            ChatMessage.chat_id == chat_id, ChatMessage.message_id == message_id,
+            ChatMessage.chat_id == chat_id,
+            ChatMessage.message_id == message_id,
         )
     )
     assert len(rows.scalars().all()) == 1
@@ -166,9 +192,9 @@ async def test_regression_message_repo_save_duplicate_safe(db_session) -> None:
 # ─── T0-05: /healthz endpoint reachable ────────────────────────────────────────────────────
 
 def test_regression_healthz_returns_a_status(app_env, monkeypatch) -> None:
-    """Smoke: /healthz returns 200 OR 503, and the body contains a 'status' key.
-    Does not require a real DB — patches report() to a fixed healthy response so the
-    regression umbrella is fully offline."""
+    """Smoke: /healthz returns 200 OR 503, body has 'status' key, no obvious secret leak.
+    Patches ``report()`` to a fixed healthy response so the regression umbrella stays
+    fully offline."""
     from fastapi.testclient import TestClient
 
     from bot.services import health as health_module
@@ -190,7 +216,6 @@ def test_regression_healthz_returns_a_status(app_env, monkeypatch) -> None:
     assert response.status_code in (200, 503), "T0-05 regression: /healthz did not return a status code"
     body = response.json()
     assert "status" in body, "T0-05 regression: response body missing 'status' field"
-    # Defense in depth: smoke that no obvious secret-shaped value leaks.
     body_str = json.dumps(body)
     for needle in ("123456:test-token", "test-pass", "test-session-secret", "changeme"):
         assert needle not in body_str
