@@ -5,6 +5,7 @@
 .env.dev
 .env.dev.real
 .superflow-state.json
+.par-evidence.json
 .worktrees/
 .claude/agent-memory/
 .claude/worktrees/
