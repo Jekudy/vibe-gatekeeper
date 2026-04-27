@@ -54,7 +54,7 @@ flags) are allowed to infer from it.
 
 ### Live ingestion (T1-14)
 
-Every `edited_message` Telegram update received by the running bot produces:
+Each content-changing `edited_message` Telegram update for a known prior message produces:
 
 1. A lookup of the existing `chat_messages` row by `(chat_id, message_id)`.
 2. A new content hash computed via `compute_content_hash` (chv1 recipe, T1-08).
@@ -65,6 +65,11 @@ Every `edited_message` Telegram update received by the running bot produces:
 The original message text arrives as a regular `message` update (not `edited_message`),
 so it always produces the first `message_versions` row with `version_seq=1`. Edit
 history is lossless from the moment the bot is running.
+
+Edits with an unchanged `content_hash` are no-ops (the existing row is returned by
+`insert_version` without creating a duplicate). Edits for messages whose
+`chat_messages` row is not yet found (unknown prior message) are logged and skipped
+(see `bot/handlers/edited_message.py`).
 
 The `edit_date` field from the Telegram API is stored in `message_versions.edit_date`
 (DateTime, nullable). For `version_seq=1` (the original), `edit_date` is NULL because
@@ -100,8 +105,8 @@ follows from that constraint.
 ### Fixture evidence
 
 The fixture `tests/fixtures/td_export/edited_messages.json` (shipped in #91) contains
-5 messages, 2 of which have an `edited` field set. In real community exports the fraction
-of edited messages is typically 10-30% of the corpus.
+5 messages, 2 of which have an `edited` field set. In real community exports a non-trivial fraction of messages have `edited` set
+(anecdotally observed; not measured in this repository).
 
 ---
 
@@ -112,7 +117,8 @@ of edited messages is typically 10-30% of the corpus.
 **What it stores:**
 
 - One `chat_messages` row (the message envelope).
-- One `message_versions` row with `version_seq=1`.
+- One `message_versions` row with `version_seq=1` (conditional on no prior live row for
+  the same `(chat_id, message_id)` — see §5 step 5 for the overlap rule).
 - A new boolean flag `imported_final=TRUE` on the `message_versions` row.
 - `edit_date` populated from `edited_unixtime` if the TD message has it.
 
@@ -139,7 +145,7 @@ of edited messages is typically 10-30% of the corpus.
 ### Option B — Best-effort v1 with marker
 
 **What it stores:** Identical to Option A. A single `message_versions` row,
-`version_seq=1`, `imported_final=TRUE`.
+`version_seq=1` (conditional on no prior live row — see §5 step 5), `imported_final=TRUE`.
 
 **What it loses:** Identical to Option A.
 
@@ -158,11 +164,13 @@ them as one approach.
 **What it stores:** Nothing. Any TD message with an `edited` field set is skipped.
 
 **What it loses:** Substantial content. In the test fixture, 2 of 5 messages (40%) have
-`edited` set. In real community exports the fraction is typically 10-30%.
+`edited` set.
 
 **Assessment:** Overly restrictive and not useful. Edited messages are semantically
 equivalent to other messages once we have their final text — we lose no more accuracy by
-importing them than by refusing them. Option C is rejected.
+importing them than by refusing them. In real community exports a non-trivial fraction of
+messages have `edited` set (anecdotally observed; not measured in this repository).
+Option C is rejected.
 
 ---
 
@@ -227,26 +235,57 @@ If a message with `imported_final=TRUE` contains `#offrecord` in its final text,
 apply path must redact it in the same transaction, exactly as it would for a live message.
 The `imported_final` flag has no bearing on this path.
 
+### Why not derive provenance from the FK chain instead?
+
+An alternative to the `imported_final` Boolean is to derive provenance at read time via
+the existing FK chain: `message_versions.raw_update_id → telegram_updates.ingestion_run_id
+→ ingestion_runs.run_type`. This alternative is rejected for four reasons:
+
+1. **Query cost**: every read-side query that needs to filter `message_versions` by
+   provenance (search, q&a, citations, audit) would require a JOIN to `telegram_updates`
+   and `ingestion_runs`. On hot read paths this is a measurable performance penalty.
+2. **Consumer model**: downstream consumers (q&a, search, citation surfaces) treat
+   provenance as a row-level attribute of the version — not as a chain-derived property.
+   A Boolean column maps directly to this mental model; the FK chain does not.
+3. **Write cost**: the Boolean denormalisation is a single column set at insert time. It
+   adds no ongoing cost relative to rows that would already be written with `raw_update_id`.
+4. **Audit trail preserved**: the FK chain (`raw_update_id → ingestion_run_id →
+   run_type`) is retained on the row as the audit trail of last resort. If `imported_final`
+   ever drifts from the chain, the chain is the ground truth and can be used to correct it.
+
 ### `imported_final=TRUE` for all imported rows, not just edited ones
 
 There is a choice: set `imported_final=TRUE` only for rows where `edited` is present in
 the TD export, or for ALL imported rows.
 
-**Recommendation: set `imported_final=TRUE` for ALL imported rows.** The reason is that
-the flag means "constructed from a static archive without live edit-chain knowledge" — and
-that is true of every imported row, not just the ones with `edited` set. Even a message
-that was never edited in TD export is still a snapshot; we do not have the live ingestion
-history for it. The flag is about provenance (archive vs. live), not about whether the
-message was ever edited.
+**Recommendation: set `imported_final=TRUE` for ALL imported user-authored messages that
+create a `message_versions` row.** (Service messages are skipped by the parser per
+`docs/memory-system/telegram-desktop-export-schema.md` §3 service row — they produce no
+`message_versions` row at all.) The reason is that the flag means "constructed from a
+static archive without live edit-chain knowledge" — and that is true of every imported
+user-authored row, not just the ones with `edited` set. Even a message that was never
+edited in TD export is still a snapshot; we do not have the live ingestion history for it.
+The flag is about provenance (archive vs. live), not about whether the message was ever
+edited.
 
 If downstream needs to know "was this message ever edited before the export?", that is a
 separate signal. The implementation SHOULD preserve the `edited` field presence as a
 separate boolean, e.g. `imported_was_edited`, on the same `message_versions` row. This
 is out of scope for this ticket but is documented as future work in §8.
 
-Invariant: `imported_final=TRUE` for all rows where `ingestion_run_id` points to an
-import run (not a live run). This is a simpler, more consistent invariant than keying
-on the `edited` field.
+Invariant: `imported_final=TRUE` denormalises provenance for query efficiency and audit
+clarity. The boolean is the source of truth at the `message_versions` row level; the FK
+chain is the audit trail. The FK chain resolves as:
+`message_versions.raw_update_id → telegram_updates.ingestion_run_id →
+ingestion_runs.run_type`. A row's `imported_final` MUST be TRUE iff that chain resolves
+to `ingestion_runs.run_type = 'import'`. The boolean denormalisation avoids a JOIN to
+`telegram_updates` + `ingestion_runs` on every read-side query — a single Boolean column
+is cheaper to filter than a two-table join on hot read paths. Downstream consumers
+(q&a, search, citations) treat provenance as a row-level attribute, not a chain attribute.
+The FK chain remains the audit trail of last resort if the boolean ever drifts (e.g.
+from a bug in the import apply path). `#103` must keep them consistent: every row written
+by an import run sets `imported_final=TRUE`; every row written by live ingestion leaves
+it `FALSE`.
 
 ---
 
@@ -262,10 +301,12 @@ implementation lands entirely in #103 (T2-03, Stream Delta).
    `imported_final=FALSE` without touching them.
 
 2. **Set `imported_final=TRUE`** in the import apply path for every `message_versions`
-   row created during an import run. The simplest invariant: if the `ingestion_run_id`
-   on the row belongs to an import (not live) run, `imported_final=TRUE`. Concretely,
-   the apply path will pass `imported_final=True` to `MessageVersionRepo.insert_version`
-   (or its equivalent in the import path).
+   row created during an import run. The apply path knows at call time that it is
+   operating on an import run; it will pass `imported_final=True` to
+   `MessageVersionRepo.insert_version` (or its equivalent in the import path).
+   The FK chain `message_versions.raw_update_id → telegram_updates.ingestion_run_id
+   → ingestion_runs.run_type` is the audit trail confirming the provenance; the
+   Boolean is the denormalised fast-read copy.
 
 3. **For messages with `edited_unixtime` set:** populate `message_versions.edit_date`
    from that timestamp. This preserves at minimum the timestamp of the last known edit.
@@ -275,15 +316,30 @@ implementation lands entirely in #103 (T2-03, Stream Delta).
 4. **For messages without `edited` set:** still set `imported_final=TRUE` (provenance
    flag, not an "was-edited" flag) and leave `edit_date=NULL`.
 
-5. **`version_seq=1` for all imported messages.** There is no version history to
-   reconstruct, so every imported message starts at v1. If the same message was
-   previously live-ingested (partial overlap between export window and bot operation
-   window), the idempotency logic in `MessageVersionRepo.insert_version` (keyed on
-   `(chat_message_id, content_hash)`) handles the collision: if the hashes match, the
-   existing row is returned unchanged; if they differ (content changed between live ingest
-   and the export snapshot), a new version row is inserted. The `imported_final` flag
-   applies to the row inserted by the import path; live-ingested rows remain
-   `imported_final=FALSE`.
+5. **Overlap handling — `version_seq` is NOT always 1.** `MessageVersionRepo.insert_version`
+   computes `version_seq = max(existing) + 1`. The resulting `version_seq` therefore
+   depends on whether a live row already exists for the same `chat_message_id`:
+
+   - **New chat_message (no prior `message_versions` row):** The import inserts
+     `version_seq=1`, `imported_final=TRUE`. This is the common case for messages that
+     predate the bot's deployment window.
+
+   - **Existing chat_message (a live-ingested row already present for the same
+     `(chat_id, message_id)`):** The import path **MUST NOT** insert a new
+     `message_versions` row. The existing live row is authoritative. Behavior:
+     - Skip the version insert entirely.
+     - Increment a counter on the import run's `stats_json` (e.g.
+       `"import.skip_existing_message_versions"`) so dry-run #99 / apply #103 can
+       report it to the operator.
+     - Do NOT mutate the existing row's `imported_final` flag. A live-ingested row
+       with `imported_final=FALSE` stays `FALSE` — the live row's provenance is not
+       shifted by an import overlap. **Live-ingested rows always win the provenance
+       flag.**
+
+   - **chat_message imported first, live edit arrives later (T1-14 path):** The live
+     `edited_message` handler creates a new `message_versions` row at `version_seq=2`.
+     That new row is a live row — `imported_final=FALSE`. The original v1 (imported)
+     retains `imported_final=TRUE`. Both flags are stable; no action needed.
 
 6. **`MessageVersionRepo.insert_version`** must be extended to accept an optional
    `imported_final: bool = False` parameter and pass it through to the INSERT.
