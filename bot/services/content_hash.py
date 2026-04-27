@@ -1,49 +1,110 @@
-"""Content hash strategy for ``message_versions`` (T1-07 minimal; T1-08 ratifies).
+"""Canonical content hash for ``message_versions`` (T1-08).
 
 The hash pins one content state of a message so q&a citations remain stable across
 edits (Phase 4). Two versions with identical content produce identical hashes —
 ``MessageVersionRepo.insert_version`` uses this for idempotency.
 
-Hash inputs (canonical, ordered):
-1. ``text`` (or empty string)
-2. ``caption`` (or empty string)
-3. ``message_kind`` (or 'text' default — legacy rows have NULL kind)
-4. ``entities_json`` reserved for T1-08 — currently always ``None``
+## Canonical recipe (T1-08, format version "chv1")
 
-Output: hex SHA-256 of UTF-8 canonical JSON of the tuple.
+The hash inputs are exactly the four fields below, in this fixed order:
 
-T1-08 may extend the input tuple (e.g. add entities) and bump a version tag in the
-hash payload. When that happens, all hashes change — backfilled v1 rows persist with
-the legacy hash forever; new versions use the new hash. The DB stores whatever the
-caller passes; the hash function defines the canonical recipe.
+1. **Format version tag** — currently ``"chv1"``. Bumped if the recipe changes; the
+   tag is included in the hashed payload so a recipe change cleanly produces new
+   hashes for the same content.
+2. **text** — the message text body, or ``""`` if absent.
+3. **caption** — the media caption, or ``""`` if absent.
+4. **message_kind** — the classification (``text``, ``photo``, ``video``, ...), or
+   ``"text"`` if absent.
+5. **entities** — list of Telegram message entities normalized into a stable order
+   (sorted by offset, then length, then type). The list is JSON-encoded with
+   ``sort_keys=True`` so each entity dict is also stable. Empty list (or None) is
+   treated identically: ``[]``.
+
+The payload is serialized with ``json.dumps(..., sort_keys=True, separators=(',',':'))``
+to remove whitespace and dict-key ambiguity, then SHA-256 hashed (UTF-8) and returned
+hex-encoded.
+
+## What this hash MUST NOT include
+
+- Volatile raw_json fields (date, id, from_user, message_id, chat) — those are
+  metadata, not content. They are intentionally NOT accepted by this function.
+- Reactions, edit_date, view counts — those are state, not content.
+- Anything that would make the same logical message hash differently across
+  ingestion attempts.
+
+The function signature enforces this: only the four canonical inputs are accepted;
+no kwargs catch-all.
+
+## Backward-compat note for T1-07 backfilled rows
+
+T1-07's first-cut recipe predated the version tag and entity normalization. v1 rows
+created by the T1-07 backfill migration persist with their legacy hashes; live
+ingestion (T1-04 + T1-14) and any post-T1-08 inserts produce ``chv1`` hashes.
+
+This divergence does NOT break ``MessageVersionRepo.insert_version`` idempotency:
+the repo keys on ``(chat_message_id, content_hash)``, so a given chat_message_id
+sees its legacy v1 hash AND any new chv1 hashes as distinct rows — which is the
+correct semantic outcome (a recipe change IS a semantic difference).
+
+If we ever need to migrate legacy hashes forward, that's a separate ticket: walk
+v1 rows where ``content_hash`` doesn't match the current chv1 of the same
+``(text, caption, message_kind)``, recompute, and store. T1-08 deliberately does NOT
+do this — backfill stability is preserved.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+from typing import Any
+
+# Bump when the recipe changes (e.g. add new field, change default, change normalization).
+# Old hashes persist forever; new hashes use the new tag.
+HASH_FORMAT_VERSION = "chv1"
+
+
+def _normalize_entities(entities: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Return entities sorted by ``(offset, length, type)`` so list-ordering does not
+    affect the hash.
+
+    Telegram delivers entities in the order they appear in the message, but downstream
+    code might re-order them (e.g. when merging entity lists after an edit). The hash
+    is intended to capture content equivalence — re-ordered entities that describe the
+    same span set are equivalent and must hash the same.
+    """
+    if not entities:
+        return []
+    return sorted(
+        entities,
+        key=lambda e: (
+            int(e.get("offset", 0)),
+            int(e.get("length", 0)),
+            str(e.get("type", "")),
+        ),
+    )
 
 
 def compute_content_hash(
     text: str | None,
     caption: str | None,
     message_kind: str | None,
-    entities_json: dict | list | None = None,
+    entities: list[dict[str, Any]] | None = None,
 ) -> str:
-    """Return hex SHA-256 of a canonical content tuple.
+    """Return the canonical hex SHA-256 ``content_hash`` for a message version.
 
-    ``entities_json`` is accepted for forward-compatibility with T1-08 but is currently
-    serialized into the canonical form alongside the other fields. If the same tuple is
-    passed twice (regardless of dict key order in entities), the same hash is produced.
+    See module docstring for the formal recipe and the backward-compat note. The
+    function takes ONLY the four canonical inputs — no kwargs, no raw_json.
     """
     payload = json.dumps(
         [
+            HASH_FORMAT_VERSION,
             text or "",
             caption or "",
             message_kind or "text",
-            entities_json,  # may be None — JSON-serializable as null
+            _normalize_entities(entities),
         ],
         sort_keys=True,
-        default=str,
+        separators=(",", ":"),
+        ensure_ascii=False,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
