@@ -56,31 +56,12 @@ logger = logging.getLogger(__name__)
 
 router = Router(name="edited_message")
 
-# chv1 format version prefix — used for legacy hash detection (HIGH #3).
-_CHV1_PREFIX = "chv"
-
-
-def _has_chv1_hash(content_hash: str | None) -> bool:
-    """Return True if the hash uses the chv1 recipe (starts with a 64-char hex string
-    that was computed with HASH_FORMAT_VERSION in the payload).
-
-    The T1-07 backfill migration produced hashes WITHOUT the version tag in the payload
-    (just [text, caption, message_kind, entities]). The T1-08 chv1 recipe adds
-    ``"chv1"`` as the first list element. Both produce 64-char hex SHA-256 strings —
-    there is no structural difference in the hash string itself.
-
-    We cannot distinguish legacy vs chv1 hashes by inspecting the hash alone. Instead:
-    - If ``current_version_id`` is NULL, no version row was ever linked — treat as legacy.
-    - If we can recompute chv1 from the row's current text/caption/kind and it MATCHES
-      the stored hash, it's already chv1 (or content is identical either way).
-    - If it doesn't match, the stored hash is a legacy hash — compare the NEW chv1 hash
-      against the stored one: if different, we have a real content change.
-
-    In practice, the check-then-compare logic in the handler is: compute NEW chv1 for
-    the edited content; look up version by hash; if not found, get max_seq and insert.
-    This is idempotent regardless of whether the stored hash is legacy or chv1.
-    """
-    return content_hash is not None
+# Legacy hash strategy (HIGH #3): we do NOT distinguish legacy vs chv1 by inspecting the
+# hash string itself — both are 64-char SHA-256 hex with no structural difference. Instead
+# the handler always recomputes chv1 from the existing row's text/caption/kind and compares
+# to the new edit chv1 hash; ``MessageVersionRepo.insert_version`` is idempotent on
+# (chat_message_id, content_hash). See ``handle_edited_message`` Step 6 for the inline
+# logic.
 
 
 def _build_entities_json(message: Message) -> list[dict] | None:
@@ -302,6 +283,11 @@ async def handle_edited_message(
     if not is_redacted_version:
         entities_json = _build_entities_json(message)
 
+    # Note (Claude review MEDIUM-2): for redacted versions we still pass ``new_hash`` —
+    # the chv1 of the *un-redacted* edit content — even though the stored ``text``/
+    # ``caption`` columns are NULL. This is intentional: the hash anchors a stable
+    # citation key per content state. Two redacted version rows can share NULL columns
+    # but differ in ``content_hash``; that is a feature, not an inconsistency.
     new_version = await MessageVersionRepo.insert_version(
         session,
         chat_message_id=existing.id,
