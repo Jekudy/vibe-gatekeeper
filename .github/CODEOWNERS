@@ -1,0 +1,53 @@
+# CODEOWNERS for vibeshkoder
+#
+# Auto-assigns reviewers when PRs touch these paths.
+# Replace placeholders (@<...-handle>) with actual GitHub handles as collaborators are onboarded.
+#
+# Note: branch protection "require code owner review" is satisfied by ANY one matching owner approval —
+# for sensitive zones requiring multi-owner sign-off, set `required_approving_review_count: 2`.
+
+# default fallback
+* @Jekudy @<tech-lead-handle>
+
+# architecture / memory governance docs
+/docs/memory-system/                    @Jekudy @<tech-lead-handle>
+/docs/memory-system/decisions/          @Jekudy @<tech-lead-handle>
+
+# db, migrations, source-of-truth
+/bot/db/                                @<db-owner-handle> @<tech-lead-handle>
+/alembic/                               @<db-owner-handle> @<tech-lead-handle>
+
+# ingestion / offrecord-sensitive message handling
+/bot/handlers/chat_messages.py          @<governance-owner-handle> @<tech-lead-handle>
+/bot/services/ingestion.py              @<governance-owner-handle> @<tech-lead-handle>
+/bot/services/normalization.py          @<governance-owner-handle> @<tech-lead-handle>
+/bot/services/governance.py             @<governance-owner-handle> @<tech-lead-handle>
+
+# llm boundary — no direct llm calls outside this area
+/bot/services/llm_gateway/              @<llm-owner-handle> @<tech-lead-handle>
+/bot/services/llm_gateway.py            @<llm-owner-handle> @<tech-lead-handle>
+
+# qa / retrieval / evidence
+/bot/services/search.py                 @<governance-owner-handle> @<tech-lead-handle>
+/bot/services/evidence.py               @<governance-owner-handle> @<tech-lead-handle>
+/bot/services/qa.py                     @<governance-owner-handle> @<tech-lead-handle>
+
+# admin surfaces that can expose memory
+/web/routes/governance.py               @<governance-owner-handle> @<tech-lead-handle>
+/web/routes/memory.py                   @<governance-owner-handle> @<tech-lead-handle>
+/web/routes/cards.py                    @<governance-owner-handle> @<tech-lead-handle>
+/web/routes/digests.py                  @<governance-owner-handle> @<tech-lead-handle>
+
+# import path — resurrection risk
+/bot/importers/                         @<db-owner-handle> @<governance-owner-handle>
+/scripts/import_telegram_export.py      @<db-owner-handle> @<governance-owner-handle>
+
+# tests around privacy/governance/search
+/tests/                                 @<qa-owner-handle> @<tech-lead-handle>
+
+# CI / infra / secrets
+/.github/                               @Jekudy
+/Dockerfile.bot                         @Jekudy
+/Dockerfile.web                         @Jekudy
+/docker-compose.yml                     @Jekudy
+/scripts/                               @Jekudy

@@ -1,0 +1,51 @@
+name: ADR Proposal
+description: >
+  Propose a new Architecture Decision Record. After this issue is accepted, create the ADR
+  as a Markdown file in docs/memory-system/decisions/ (e.g. ADR-XXXX-short-title.md).
+title: "[ADR] "
+labels: ["adr"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **After acceptance:** create the ADR in `docs/memory-system/decisions/ADR-XXXX-short-title.md`
+        and close this issue by referencing it in the PR description.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What situation or constraint forces a decision to be made?
+    validations:
+      required: true
+
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decision (Draft)
+      description: The proposed decision. Write it as a definitive statement ("We will…").
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What were the other options? Why were they not chosen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: consequences
+    attributes:
+      label: Consequences
+      description: What becomes easier or harder as a result of this decision? Any trade-offs?
+    validations:
+      required: true
+
+  - type: input
+    id: references
+    attributes:
+      label: References
+      description: Related RFCs, issues, PRs, or external docs.
+      placeholder: "#42, https://..."

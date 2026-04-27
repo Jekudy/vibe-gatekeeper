@@ -1,0 +1,51 @@
+name: RFC – Design Proposal
+description: Propose a design change or architectural decision for discussion before implementation.
+title: "[RFC] "
+labels: ["rfc"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem are you solving? Why does it need solving now?
+    validations:
+      required: true
+
+  - type: textarea
+    id: options
+    attributes:
+      label: Options Considered
+      description: List the alternatives you evaluated (minimum 2).
+      placeholder: |
+        **Option A – ...**
+        Pros: ...
+        Cons: ...
+
+        **Option B – ...**
+        Pros: ...
+        Cons: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: recommendation
+    attributes:
+      label: Recommendation
+      description: Which option do you recommend and why?
+    validations:
+      required: true
+
+  - type: textarea
+    id: open-questions
+    attributes:
+      label: Open Questions
+      description: Unresolved questions that need input before a decision can be made.
+      placeholder: |
+        - [ ] ...
+
+  - type: input
+    id: related-adr
+    attributes:
+      label: Related ADR
+      description: Link to an existing ADR in `docs/memory-system/decisions/` if applicable.
+      placeholder: "docs/memory-system/decisions/ADR-0001-*.md or N/A"
