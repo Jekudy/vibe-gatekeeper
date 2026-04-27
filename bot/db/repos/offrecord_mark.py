@@ -13,7 +13,7 @@ conflict target is the partial unique index
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,9 +34,16 @@ class OffrecordMarkRepo:
 
         Idempotent on duplicate ``(chat_message_id, mark_type)`` pairs: uses
         ``ON CONFLICT DO NOTHING`` targeting the partial unique index
-        ``ix_offrecord_marks_chat_message_id_mark_type`` (migration 013, Issue #67).
-        When a conflict is detected (no row returned by RETURNING), fetches the
-        existing row via a follow-up SELECT.
+        ``ix_offrecord_marks_chat_message_id_mark_type``
+        (``UNIQUE (chat_message_id, mark_type) WHERE chat_message_id IS NOT NULL``,
+        added by migration 013, Issue #67). The ``index_where`` predicate is passed
+        explicitly to match Postgres's partial-index conflict resolution; omitting it
+        would cause a runtime error ("no unique or exclusion constraint matching the ON
+        CONFLICT specification").
+
+        Conflict path (redelivery / retry): the INSERT returns no row; the method falls
+        back to a SELECT for the existing ``(chat_message_id, mark_type)`` row and
+        returns it. No second audit row is created — redelivery is a true no-op.
 
         Flushes; does not commit. Caller controls the transaction lifecycle (typically
         the chat_messages handler's session, which DbSessionMiddleware commits on
@@ -64,6 +71,7 @@ class OffrecordMarkRepo:
             .values(**values)
             .on_conflict_do_nothing(
                 index_elements=["chat_message_id", "mark_type"],
+                index_where=text("chat_message_id IS NOT NULL"),
             )
             .returning(OffrecordMark)
         )

@@ -26,6 +26,23 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Dedup guard: the T1-13 → #67 bug window may have produced duplicate
+    # (chat_message_id, mark_type) rows before ON CONFLICT DO NOTHING was in place.
+    # Keep the row with the smallest id for each pair; delete the rest so the
+    # subsequent CREATE UNIQUE INDEX does not fail on pre-existing duplicates.
+    op.execute(
+        sa.text(
+            """
+            DELETE FROM offrecord_marks a
+            USING offrecord_marks b
+            WHERE a.id > b.id
+              AND a.chat_message_id = b.chat_message_id
+              AND a.mark_type = b.mark_type
+              AND a.chat_message_id IS NOT NULL
+            """
+        )
+    )
+
     op.create_index(
         "ix_offrecord_marks_chat_message_id_mark_type",
         "offrecord_marks",
