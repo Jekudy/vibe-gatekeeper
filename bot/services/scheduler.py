@@ -217,6 +217,9 @@ def start_scheduler(bot: Bot) -> None:
         args=[bot],
         id="process_invite_outbox",
         replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=60,
     )
     scheduler.add_job(
         check_vouch_deadlines,
