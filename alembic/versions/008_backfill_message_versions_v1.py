@@ -1,13 +1,23 @@
 """backfill_message_versions_v1
 
-T1-07: walk legacy ``chat_messages`` rows (``current_version_id IS NULL``) and create
-a ``message_versions`` v1 row for each. Sets ``chat_messages.current_version_id`` so
-the operation is idempotent — re-running this migration after success is a no-op
-because the WHERE clause excludes already-backfilled rows.
+T1-07: walk legacy ``chat_messages`` rows (``current_version_id IS NULL``) and create a
+``message_versions`` v1 row for each. Sets ``chat_messages.current_version_id`` so the
+operation is idempotent — re-running this migration after success is a no-op because
+the WHERE clause excludes already-backfilled rows.
 
-The migration delegates to ``bot/services/backfill.py`` so the same code path is
-exercised by tests. Chunked (1000 rows per batch by default) to keep prod transaction
-sizes bounded.
+Implementation note (Codex BLOCKER #1 fix):
+``alembic/env.py`` already runs migrations under ``asyncio.run(...)`` and hands a SYNC
+connection to ``do_run_migrations`` via ``connection.run_sync(...)``. Inside an
+``upgrade()`` body, ``op.get_bind()`` returns that sync connection — wrapped on top of
+the async driver. Calling ``asyncio.run(...)`` here would nest event loops and raise
+``RuntimeError`` at runtime. So this migration uses the sync connection from
+``op.get_bind()`` directly, runs the same hash + INSERT logic via plain SQLAlchemy
+Core, and stays inside Alembic's transaction.
+
+Because the work is done in the same transaction Alembic opens for the migration,
+``commit_per_batch`` is NOT applicable here. For ~5k–50k legacy rows this is acceptable
+on first deployment; if the dataset grows past this, a future ticket will switch to a
+data-only migration that opens its own connection outside Alembic.
 
 Revision ID: 008
 Revises: 007
@@ -16,83 +26,126 @@ Create Date: 2026-04-27
 
 from __future__ import annotations
 
-import asyncio
 from typing import Sequence, Union
 
+import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.ext.asyncio import AsyncSession
+
+from bot.services.content_hash import compute_content_hash
 
 revision: str = "008"
 down_revision: Union[str, Sequence[str], None] = "007"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+_BATCH_SIZE = 1000
 
-async def _run_async_backfill() -> int:
-    """Run the async backfill in alembic's sync context.
-
-    alembic uses a SYNC connection (env.py wraps it). We open an independent async
-    engine bound to the same DATABASE_URL so the backfill code shares the live ORM
-    layer. The migration commits at the end via this engine; alembic's outer
-    transaction is unaffected.
+_SELECT_LEGACY = sa.text(
     """
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    SELECT id, text, caption, message_kind, date, raw_update_id, is_redacted
+    FROM chat_messages
+    WHERE current_version_id IS NULL
+    ORDER BY id
+    LIMIT :batch_size
+    """
+)
 
-    from bot.config import settings
-    from bot.services.backfill import backfill_v1_message_versions
+_INSERT_VERSION = sa.text(
+    """
+    INSERT INTO message_versions
+        (chat_message_id, version_seq, text, caption, normalized_text,
+         entities_json, edit_date, captured_at, content_hash, raw_update_id, is_redacted)
+    VALUES
+        (:chat_message_id, 1, :text, :caption, :normalized_text,
+         NULL, NULL, :captured_at, :content_hash, :raw_update_id, :is_redacted)
+    RETURNING id
+    """
+)
 
-    engine = create_async_engine(settings.DATABASE_URL, echo=False)
-    Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    try:
-        async with Session() as session:
-            # commit_per_batch=True so a 50k-row backfill does not hold one giant
-            # transaction. Tests use the default (False) with outer-tx rollback for
-            # isolation.
-            count = await backfill_v1_message_versions(session, commit_per_batch=True)
-            # Final commit covers the (possibly partial) trailing batch that did not
-            # reach the per-batch commit branch.
-            await session.commit()
-            return count
-    finally:
-        await engine.dispose()
+_UPDATE_PARENT = sa.text(
+    """
+    UPDATE chat_messages
+    SET current_version_id = :version_id
+    WHERE id = :chat_message_id
+    """
+)
 
 
 def upgrade() -> None:
-    # Use op.get_bind() only to confirm we're on postgres; backfill itself runs via
-    # an independent async engine (see _run_async_backfill).
     bind = op.get_bind()
-    dialect = bind.dialect.name
-    if dialect != "postgresql":
+    if bind.dialect.name != "postgresql":
         raise RuntimeError(
-            f"T1-07 backfill requires postgres (got {dialect!r}). See T0-02."
+            f"T1-07 backfill requires postgres (got {bind.dialect.name!r}). See T0-02."
         )
 
-    count = asyncio.run(_run_async_backfill())
-    print(f"[T1-07] backfilled v1 message_versions for {count} chat_messages rows")
+    total = 0
+    while True:
+        rows = list(bind.execute(_SELECT_LEGACY, {"batch_size": _BATCH_SIZE}))
+        if not rows:
+            break
+
+        for row in rows:
+            content_hash = compute_content_hash(
+                text=row.text,
+                caption=row.caption,
+                message_kind=row.message_kind,
+                entities_json=None,
+            )
+            inserted = bind.execute(
+                _INSERT_VERSION,
+                {
+                    "chat_message_id": row.id,
+                    "text": row.text,
+                    "caption": row.caption,
+                    "normalized_text": row.text,
+                    # Pin to the original message moment so q&a citations remain stable
+                    # regardless of when the migration ran (per HANDOFF.md §6 #5 +
+                    # issue #31 acceptance "captured_at=date").
+                    "captured_at": row.date,
+                    "content_hash": content_hash,
+                    "raw_update_id": row.raw_update_id,
+                    "is_redacted": row.is_redacted,
+                },
+            )
+            version_id = inserted.scalar()
+            bind.execute(
+                _UPDATE_PARENT,
+                {"version_id": version_id, "chat_message_id": row.id},
+            )
+            total += 1
+
+        if len(rows) < _BATCH_SIZE:
+            break
+
+    print(f"[T1-07] backfilled v1 message_versions for {total} chat_messages rows")
 
 
 def downgrade() -> None:
     """Wipe v1 versions created by the backfill and reset current_version_id.
 
     Targets only ``version_seq=1`` rows whose ``raw_update_id IS NULL`` (heuristic for
-    backfilled rows — live ingestion writes raw_update_id once T1-04+T1-14 land). On
-    a fresh DB this is a clean reverse; on a DB where post-backfill v2/v3 versions
-    exist for the same messages, those survive. Operators should not normally
-    downgrade this migration — it's here for completeness.
+    backfilled rows — live ingestion writes raw_update_id once T1-04+T1-14 land). Any
+    manually-inserted v1 test rows with NULL ``raw_update_id`` would also be wiped, but
+    that's acceptable in the downgrade path since tests use isolated transactions.
     """
     bind = op.get_bind()
     bind.execute(
-        op.text(
-            "UPDATE chat_messages SET current_version_id = NULL "
-            "WHERE current_version_id IN ("
-            "  SELECT id FROM message_versions "
-            "  WHERE version_seq = 1 AND raw_update_id IS NULL"
-            ")"
+        sa.text(
+            """
+            UPDATE chat_messages
+            SET current_version_id = NULL
+            WHERE current_version_id IN (
+                SELECT id FROM message_versions
+                WHERE version_seq = 1 AND raw_update_id IS NULL
+            )
+            """
         )
     )
     bind.execute(
-        op.text(
-            "DELETE FROM message_versions "
-            "WHERE version_seq = 1 AND raw_update_id IS NULL"
+        sa.text(
+            """
+            DELETE FROM message_versions
+            WHERE version_seq = 1 AND raw_update_id IS NULL
+            """
         )
     )
