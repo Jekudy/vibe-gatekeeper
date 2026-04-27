@@ -238,3 +238,154 @@ async def test_save_different_messages_in_same_chat_both_persist(db_session) -> 
 
     assert await _count_messages(db_session, chat_id, msg_id_a) == 1
     assert await _count_messages(db_session, chat_id, msg_id_b) == 1
+
+
+# ─── Issue #67 tests ─────────────────────────────────────────────────────────
+
+
+async def test_save_duplicate_with_new_policy_refreshes_policy_fields(db_session) -> None:
+    """AC2: duplicate delivery with explicit policy args must refresh memory_policy /
+    is_redacted on the existing row."""
+    from bot.db.repos.message import MessageRepo
+
+    user_id = _random_user_id()
+    chat_id = _random_chat_id()
+    message_id = _random_message_id()
+    when = datetime.now(timezone.utc)
+
+    await _create_user(db_session, user_id)
+
+    await MessageRepo.save(
+        db_session,
+        message_id=message_id,
+        chat_id=chat_id,
+        user_id=user_id,
+        text="hello",
+        date=when,
+        memory_policy="normal",
+        is_redacted=False,
+    )
+
+    second = await MessageRepo.save(
+        db_session,
+        message_id=message_id,
+        chat_id=chat_id,
+        user_id=user_id,
+        text="hello",
+        date=when,
+        memory_policy="offrecord",
+        is_redacted=True,
+    )
+
+    assert second.memory_policy == "offrecord"
+    assert second.is_redacted is True
+
+
+async def test_save_duplicate_with_both_none_preserves_existing_policy(db_session) -> None:
+    """AC3: legacy callers that pass neither policy arg must NOT clobber existing policy
+    fields with None/NULL."""
+    from bot.db.repos.message import MessageRepo
+
+    user_id = _random_user_id()
+    chat_id = _random_chat_id()
+    message_id = _random_message_id()
+    when = datetime.now(timezone.utc)
+
+    await _create_user(db_session, user_id)
+
+    await MessageRepo.save(
+        db_session,
+        message_id=message_id,
+        chat_id=chat_id,
+        user_id=user_id,
+        text="hello",
+        date=when,
+        memory_policy="offrecord",
+        is_redacted=True,
+    )
+
+    # Legacy call — neither memory_policy nor is_redacted passed.
+    second = await MessageRepo.save(
+        db_session,
+        message_id=message_id,
+        chat_id=chat_id,
+        user_id=user_id,
+        text="hello",
+        date=when,
+    )
+
+    assert second.memory_policy == "offrecord"
+    assert second.is_redacted is True
+
+
+async def test_save_duplicate_with_only_policy_does_not_clobber_is_redacted(db_session) -> None:
+    """AC2 selectivity: updating only memory_policy must leave is_redacted unchanged."""
+    from bot.db.repos.message import MessageRepo
+
+    user_id = _random_user_id()
+    chat_id = _random_chat_id()
+    message_id = _random_message_id()
+    when = datetime.now(timezone.utc)
+
+    await _create_user(db_session, user_id)
+
+    await MessageRepo.save(
+        db_session,
+        message_id=message_id,
+        chat_id=chat_id,
+        user_id=user_id,
+        text="hello",
+        date=when,
+        memory_policy="normal",
+        is_redacted=False,
+    )
+
+    # Duplicate with only memory_policy — no is_redacted kwarg.
+    second = await MessageRepo.save(
+        db_session,
+        message_id=message_id,
+        chat_id=chat_id,
+        user_id=user_id,
+        text="hello",
+        date=when,
+        memory_policy="offrecord",
+    )
+
+    assert second.memory_policy == "offrecord"
+    assert second.is_redacted is False
+
+
+async def test_save_duplicate_does_not_overwrite_text_when_refreshing_policy(db_session) -> None:
+    """AC4 irreversibility doctrine: text (and other content fields) must stay immutable
+    even when policy fields are being refreshed on a duplicate delivery."""
+    from bot.db.repos.message import MessageRepo
+
+    user_id = _random_user_id()
+    chat_id = _random_chat_id()
+    message_id = _random_message_id()
+    when = datetime.now(timezone.utc)
+
+    await _create_user(db_session, user_id)
+
+    await MessageRepo.save(
+        db_session,
+        message_id=message_id,
+        chat_id=chat_id,
+        user_id=user_id,
+        text="original",
+        date=when,
+    )
+
+    second = await MessageRepo.save(
+        db_session,
+        message_id=message_id,
+        chat_id=chat_id,
+        user_id=user_id,
+        text="attacker",
+        date=when,
+        memory_policy="offrecord",
+        is_redacted=True,
+    )
+
+    assert second.text == "original"
+    assert second.memory_policy == "offrecord"

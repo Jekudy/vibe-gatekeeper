@@ -301,6 +301,16 @@ class OffrecordMark(Base):
         Index("ix_offrecord_marks_mark_type_status", "mark_type", "status"),
         Index("ix_offrecord_marks_chat_message_id", "chat_message_id"),
         Index("ix_offrecord_marks_scope", "scope_type", "scope_id"),
+        # Issue #67: partial unique index so ON CONFLICT DO NOTHING + SELECT is a
+        # true no-op on duplicate delivery. NULL chat_message_id rows (thread/chat
+        # scope) are excluded so thread-scope marks stay unrestricted.
+        Index(
+            "ix_offrecord_marks_chat_message_id_mark_type",
+            "chat_message_id",
+            "mark_type",
+            unique=True,
+            postgresql_where=text("chat_message_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
