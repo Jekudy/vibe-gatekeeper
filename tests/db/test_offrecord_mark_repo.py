@@ -162,3 +162,43 @@ def test_offrecord_mark_metadata_smoke(app_env) -> None:
     fk_names = {fk.name for fk in table.foreign_keys if fk.name}
     assert "fk_offrecord_marks_chat_message_id" in fk_names
     assert "fk_offrecord_marks_set_by_user_id" in fk_names
+
+
+# ─── Issue #67 tests ─────────────────────────────────────────────────────────
+
+
+async def test_create_for_message_idempotent_on_duplicate_call(db_session) -> None:
+    """Issue #67: calling create_for_message twice for the same (chat_message_id,
+    mark_type) must produce exactly ONE row in offrecord_marks, and both returned
+    objects must have the same id."""
+    from sqlalchemy import func, select
+
+    from bot.db.models import OffrecordMark
+    from bot.db.repos.offrecord_mark import OffrecordMarkRepo
+
+    msg_id = await _make_chat_message(db_session)
+
+    first = await OffrecordMarkRepo.create_for_message(
+        db_session,
+        chat_message_id=msg_id,
+        mark_type="offrecord",
+        detected_by="deterministic_token_match_v1",
+    )
+
+    second = await OffrecordMarkRepo.create_for_message(
+        db_session,
+        chat_message_id=msg_id,
+        mark_type="offrecord",
+        detected_by="deterministic_token_match_v1",
+    )
+
+    count_result = await db_session.execute(
+        select(func.count()).select_from(OffrecordMark).where(
+            OffrecordMark.chat_message_id == msg_id,
+            OffrecordMark.mark_type == "offrecord",
+        )
+    )
+    row_count = count_result.scalar_one()
+
+    assert row_count == 1
+    assert first.id == second.id
