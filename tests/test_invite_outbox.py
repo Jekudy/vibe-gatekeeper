@@ -214,12 +214,16 @@ def test_outbox_worker_marks_failed_after_5_attempts(monkeypatch) -> None:
         "create_invite",
         AsyncMock(side_effect=RuntimeError("privacy blocked")),
     )
+    update_status_mock = AsyncMock()
+    monkeypatch.setattr(worker.ApplicationRepo, "update_status", update_status_mock)
 
     asyncio.run(worker.process_invite_outbox(bot))
 
     assert row.status == "failed"
     assert row.attempt_count == 5
     assert row.last_error == "privacy blocked"
+    update_status_mock.assert_awaited_once_with(session, 101, "privacy_block")
+    bot.send_message.assert_awaited_once()
     session.commit.assert_awaited_once()
 
 
