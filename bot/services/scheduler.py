@@ -14,6 +14,7 @@ from bot.db.repos.application import ApplicationRepo
 from bot.db.repos.intro import IntroRepo
 from bot.db.repos.user import UserRepo
 from bot.html_escape import html_escape
+from bot.services.invite_worker import process_invite_outbox
 from bot.texts import (
     ADMIN_NUDGE_MSG,
     NUDGE_MSG,
@@ -209,6 +210,14 @@ async def sync_google_sheets() -> None:
 
 def start_scheduler(bot: Bot) -> None:
     """Configure and start the scheduler."""
+    scheduler.add_job(
+        process_invite_outbox,
+        "interval",
+        seconds=30,
+        args=[bot],
+        id="process_invite_outbox",
+        replace_existing=True,
+    )
     scheduler.add_job(
         check_vouch_deadlines,
         "interval",
