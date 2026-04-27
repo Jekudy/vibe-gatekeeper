@@ -348,6 +348,92 @@ class OffrecordMark(Base):
     )
 
 
+class ForgetEvent(Base):
+    """Tombstone record for a forget/erasure request (T3-01).
+
+    Each row represents a single forget intent — WHO issued it (actor_user_id /
+    authorized_by), WHAT is being forgotten (target_type / target_id / tombstone_key),
+    and WHERE the cascade has reached (status / cascade_status). The tombstone_key is
+    globally unique; re-issuing a forget for the same target returns the existing row
+    (idempotent).
+
+    Tombstone key format (HANDOFF §10):
+    - ``message:<chat_id>:<message_id>``
+    - ``message_hash:<sha256>``
+    - ``user:<tg_id>``
+    - ``export:<source>:<export_msg_id>``
+
+    Status lifecycle: pending → processing → completed | failed.
+    cascade_status is a per-layer progress map, e.g.::
+
+        {'chat_messages': 'completed', 'message_versions': 'pending'}
+
+    Populated by Sprint 3 (#96) cascade worker; schema created here (Sprint 1 / T3-01).
+
+    actor_user_id → users.id ON DELETE SET NULL: keep the audit row even if the user
+    record is later anonymized (forget_me).
+    """
+
+    __tablename__ = "forget_events"
+    __table_args__ = (
+        CheckConstraint(
+            "target_type IN ('message','message_hash','user','export')",
+            name="ck_forget_events_target_type",
+        ),
+        CheckConstraint(
+            "authorized_by IN ('self','admin','system','gdpr_request')",
+            name="ck_forget_events_authorized_by",
+        ),
+        CheckConstraint(
+            "policy IN ('forgotten','offrecord_propagated')",
+            name="ck_forget_events_policy",
+        ),
+        CheckConstraint(
+            "status IN ('pending','processing','completed','failed')",
+            name="ck_forget_events_status",
+        ),
+        UniqueConstraint("tombstone_key", name="uq_forget_events_tombstone_key"),
+        Index("ix_forget_events_status_created_at", "status", "created_at"),
+        Index("ix_forget_events_target_type_target_id", "target_type", "target_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    target_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    actor_user_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "users.id",
+            name="fk_forget_events_actor_user_id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+    authorized_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    tombstone_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    policy: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="forgotten", server_default="forgotten"
+    )
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending", server_default="pending"
+    )
+    cascade_status: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=func.now(),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=func.now(),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
 class IntroRefreshTracking(Base):
     __tablename__ = "intro_refresh_tracking"
 
