@@ -110,9 +110,34 @@ class Intro(Base):
 
 
 class ChatMessage(Base):
+    """Normalized message archive (extended in T1-05).
+
+    The original gatekeeper bot wrote ``id, message_id, chat_id, user_id, text, date,
+    raw_json, created_at`` only. T1-05 adds the normalized fields the memory system
+    needs (reply / thread / caption / message_kind / policy / visibility / hash /
+    audit). All new columns are nullable or have server defaults so existing rows
+    survive the migration untouched.
+
+    ``current_version_id`` is a forward-reference to ``message_versions.id`` — T1-06
+    creates that table and adds the FK; for T1-05 it stays a plain integer column.
+    """
+
     __tablename__ = "chat_messages"
     __table_args__ = (
+        CheckConstraint(
+            "memory_policy IN ('normal','nomem','offrecord','forgotten')",
+            name="ck_chat_messages_memory_policy",
+        ),
+        CheckConstraint(
+            "visibility IN ('private','member','internal','public')",
+            name="ck_chat_messages_visibility",
+        ),
         Index("ix_chat_messages_chat_msg", "chat_id", "message_id", unique=True),
+        Index("ix_chat_messages_chat_id_date", "chat_id", "date"),
+        Index("ix_chat_messages_reply_to_message_id", "reply_to_message_id"),
+        Index("ix_chat_messages_message_thread_id", "message_thread_id"),
+        Index("ix_chat_messages_memory_policy", "memory_policy"),
+        Index("ix_chat_messages_content_hash", "content_hash"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -124,6 +149,36 @@ class ChatMessage(Base):
     raw_json: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=func.now(), server_default=func.now()
+    )
+
+    # T1-05 additions — all nullable / default so legacy rows survive.
+    raw_update_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey(
+            "telegram_updates.id",
+            name="fk_chat_messages_raw_update_id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+    reply_to_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    message_thread_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    caption: Mapped[str | None] = mapped_column(Text, nullable=True)
+    message_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Forward-ref to message_versions.id; T1-06 will add the FK constraint.
+    current_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    memory_policy: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="normal", server_default="normal"
+    )
+    visibility: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="member", server_default="member"
+    )
+    is_redacted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    content_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 
