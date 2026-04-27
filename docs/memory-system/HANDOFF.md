@@ -931,6 +931,46 @@ For `#nomem`:
 - Write `offrecord_marks(mark_type='offrecord')`.
 - Redact durable content. Keep ids / timestamps / hash / policy marker.
 
+### `#offrecord` ordering rule (binding for all ingestion paths)
+
+`detect_policy(text, caption)` MUST be invoked BEFORE any UPDATE that writes content
+fields to the DB. The detector + the redactor + the persistence MUST run inside the
+same transaction so that a crash mid-flow rolls back atomically and never leaves the
+DB with `text` set while `memory_policy='offrecord'`.
+
+Live paths that satisfy this today: `bot/handlers/chat_messages.py` (new messages),
+`bot/handlers/edited_message.py` (edits), `bot/services/ingestion.py::record_update`
+(raw archive, gated). Phase 2 importer and any new writer MUST route through the same
+helper (issue #89: `persist_message_with_policy`).
+
+### `#offrecord` irreversibility doctrine
+
+Once a message has been ingested as `offrecord` (or flipped to it via edit), the
+original content window is **destroyed permanently**:
+
+- `chat_messages.text/caption/raw_json` are NULL.
+- Every existing `message_versions` row of that chat_message is also redacted in the
+  same transaction (added by Phase 1 final-review hotfix — see issue closing the
+  Codex CRITICAL "PRIVACY_LEAK_CLASS_4"): `text/caption/normalized_text/entities_json`
+  → NULL, `is_redacted=True`. `content_hash` is intentionally LEFT INTACT so prior
+  citations resolve, but the redacted flag tells consumers to skip the body.
+- `offrecord_marks` row records the transition.
+- A subsequent edit removing `#offrecord` flips `memory_policy='normal'` on the parent
+  but does NOT restore `text/caption/raw_json` — the original content is unrecoverable.
+- The new edit's content is recorded only in a new `message_versions` row (when the
+  hash differs from the redacted-state hash) — Phase 4 q&a sees `is_redacted=True`
+  on the version anyway and excludes it from citations.
+
+### `#offrecord` redacted-state hashing in `message_versions`
+
+For any `message_versions` row whose `is_redacted=True`, `content_hash` MUST be derived
+from the redacted state (`compute_content_hash(text=None, caption=None, message_kind,
+entities=None)`) — NOT from the raw edit content. Storing the chv1 of the un-redacted
+content would let anyone with read access verify "was content X said?" by computing
+chv1(X) and grep'ing the column. This rule applies on the version-insert path; existing
+backfilled v1 rows whose content was NULLed by the irreversibility hotfix above retain
+their original hash (citation stability) but are flagged `is_redacted=True`.
+
 ### `forget_events` (Phase 3)
 
 Required fields: target type / id; actor; `authorized_by`; `tombstone_key`; reason; policy;
