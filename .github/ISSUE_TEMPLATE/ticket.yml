@@ -1,0 +1,100 @@
+name: Implementation Ticket
+description: A concrete development task tied to the memory system cycle.
+title: "[T?-??] "
+labels: []
+body:
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Phase
+      description: Which phase does this ticket belong to?
+      options:
+        - "0 – Gatekeeper Stabilization"
+        - "1 – Source of Truth + Raw Archive"
+        - "2a – Import Dry-Run"
+        - "2b – Import Apply"
+        - "3 – Governance"
+        - "4 – Hybrid Search + Q&A"
+        - "5 – Events + Observations"
+        - "6 – Knowledge Cards + Admin Review"
+        - "7 – Daily Summaries"
+        - "8 – Weekly Digest"
+        - "9 – Wiki / Community Catalog"
+        - "10 – Graphiti / Neo4j Projection"
+        - "11 – shkoderbench / Evals Hardening"
+        - "12 – Future Butler (design only)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Primary area affected.
+      options:
+        - "area:db"
+        - "area:ingestion"
+        - "area:governance"
+        - "area:search"
+        - "area:llm-gateway"
+        - "area:admin"
+        - "area:import"
+        - "area:evals"
+        - "area:infra"
+        - "area:docs"
+        - "area:other"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size
+      options:
+        - "S – a few hours"
+        - "M – ~1 day"
+        - "L – 2–3 days"
+        - "XL – 4+ days"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - "P0 – blocker"
+        - "P1 – high"
+        - "P2 – normal"
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: Objective, testable done-criteria. Bullet list preferred.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: input
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Issue numbers or PR links this ticket depends on (comma-separated). Leave blank if none.
+      placeholder: "#42, #57"
+
+  - type: checkboxes
+    id: scope-check
+    attributes:
+      label: AUTHORIZED_SCOPE.md check
+      description: Confirm this ticket is within the authorized scope for the selected phase.
+      options:
+        - label: >
+            I have read `docs/memory-system/AUTHORIZED_SCOPE.md` and confirmed this work
+            is within the authorized scope (or is explicitly marked STRETCH/NO and I have
+            approval to proceed).
+          required: true
