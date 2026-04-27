@@ -8,7 +8,16 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from bot.config import settings
-from bot.handlers import admin, chat_events, chat_messages, forward_lookup, questionnaire, start, vouch
+from bot.handlers import (
+    admin,
+    chat_events,
+    chat_messages,
+    edited_message,
+    forward_lookup,
+    questionnaire,
+    start,
+    vouch,
+)
 from bot.middlewares.db_session import DbSessionMiddleware
 from bot.middlewares.raw_update_persistence import RawUpdatePersistenceMiddleware
 from bot.services.scheduler import start_scheduler, stop_scheduler
@@ -31,12 +40,13 @@ logger = logging.getLogger(__name__)
 #   - callback_query       (vouch / questionnaire callbacks)
 #   - chat_member          (chat_events handler — join / leave events)
 #   - my_chat_member       (chat_events handler — bot-as-member status changes)
+#   - edited_message       (T1-14 edited_message handler — appends v(n+1) message_versions)
 #
-# Phase 1 will add 'edited_message' once T1-06 message_versions and the T1-14 edit handler
-# both exist. Phase 5 will add 'message_reaction' / 'message_reaction_count' once the
-# reactions table and handler exist. Until then, leave them out.
+# Phase 5 will add 'message_reaction' / 'message_reaction_count' once the reactions table
+# and handler exist. Until then, leave them out.
 _ALLOWED_UPDATES: tuple[str, ...] = (
     "message",
+    "edited_message",
     "callback_query",
     "chat_member",
     "my_chat_member",
@@ -97,6 +107,7 @@ async def main() -> None:
         admin.router,
         chat_events.router,
         forward_lookup.router,
+        edited_message.router,  # T1-14: edited_message handler (before chat_messages catch-all)
         chat_messages.router,  # lowest priority — catches all group messages
     )
 

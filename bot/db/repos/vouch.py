@@ -24,9 +24,7 @@ class VouchRepo:
         return vouch
 
     @staticmethod
-    async def get_voucher_for_user(
-        session: AsyncSession, user_id: int
-    ) -> VouchLog | None:
+    async def get_voucher_for_user(session: AsyncSession, user_id: int) -> VouchLog | None:
         result = await session.execute(
             select(VouchLog)
             .where(VouchLog.vouchee_id == user_id)

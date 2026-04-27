@@ -147,13 +147,13 @@ def test_outbox_worker_sends_pending(monkeypatch) -> None:
 
     monkeypatch.setattr(worker, "async_session", lambda: _SessionContext(session))
     monkeypatch.setattr(worker.InviteOutboxRepo, "get_pending", AsyncMock(return_value=[row]))
-    monkeypatch.setattr(worker.invite_service, "create_invite", AsyncMock(return_value="https://t.me/+ok"))
+    monkeypatch.setattr(
+        worker.invite_service, "create_invite", AsyncMock(return_value="https://t.me/+ok")
+    )
 
     asyncio.run(worker.process_invite_outbox(bot))
 
-    worker.invite_service.create_invite.assert_awaited_once_with(
-        bot, -100123, 101, 3002
-    )
+    worker.invite_service.create_invite.assert_awaited_once_with(bot, -100123, 101, 3002)
     bot.send_message.assert_awaited_once_with(
         chat_id=3002,
         text=worker.INVITE_LINK_MSG.format(link="https://t.me/+ok"),

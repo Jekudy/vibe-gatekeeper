@@ -33,9 +33,7 @@ class MessageVersionRepo:
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def get_max_version_seq(
-        session: AsyncSession, chat_message_id: int
-    ) -> int:
+    async def get_max_version_seq(session: AsyncSession, chat_message_id: int) -> int:
         """Return the largest ``version_seq`` for the given message, or 0 if none."""
         result = await session.execute(
             select(func.max(MessageVersion.version_seq)).where(
@@ -72,9 +70,7 @@ class MessageVersionRepo:
         ``IntegrityError`` — the caller would have to handle it. No retry is built in;
         adding it is left for the multi-instance migration.
         """
-        existing = await MessageVersionRepo.get_by_hash(
-            session, chat_message_id, content_hash
-        )
+        existing = await MessageVersionRepo.get_by_hash(session, chat_message_id, content_hash)
         if existing is not None:
             return existing
 

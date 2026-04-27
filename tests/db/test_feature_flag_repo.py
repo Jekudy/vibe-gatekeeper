@@ -29,9 +29,7 @@ def _unique_flag_key() -> str:
 async def test_get_missing_flag_returns_false(db_session) -> None:
     from bot.db.repos.feature_flag import FeatureFlagRepo
 
-    assert (
-        await FeatureFlagRepo.get(db_session, _unique_flag_key())
-    ) is False
+    assert (await FeatureFlagRepo.get(db_session, _unique_flag_key())) is False
 
 
 async def test_set_enabled_creates_row_and_get_returns_true(db_session) -> None:
@@ -40,9 +38,7 @@ async def test_set_enabled_creates_row_and_get_returns_true(db_session) -> None:
 
     key = _unique_flag_key()
 
-    flag = await FeatureFlagRepo.set_enabled(
-        db_session, flag_key=key, enabled=True, updated_by=42
-    )
+    flag = await FeatureFlagRepo.set_enabled(db_session, flag_key=key, enabled=True, updated_by=42)
     assert flag.flag_key == key
     assert flag.enabled is True
     assert flag.scope_type is None
@@ -104,9 +100,7 @@ async def test_per_scope_flags_coexist_with_global(db_session) -> None:
 
     assert (await FeatureFlagRepo.get(db_session, key)) is False
     assert (
-        await FeatureFlagRepo.get(
-            db_session, key, scope_type="chat", scope_id="-1001234567890"
-        )
+        await FeatureFlagRepo.get(db_session, key, scope_type="chat", scope_id="-1001234567890")
     ) is True
 
 
@@ -128,8 +122,7 @@ async def test_memory_flags_have_no_enabled_seed_rows(db_session) -> None:
     )
     seeded = rows.scalars().all()
     assert seeded == [], (
-        "memory.* flag was seeded with enabled=True by a migration: "
-        f"{[r.flag_key for r in seeded]}"
+        f"memory.* flag was seeded with enabled=True by a migration: {[r.flag_key for r in seeded]}"
     )
 
 

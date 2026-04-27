@@ -84,9 +84,7 @@ def _patch_join_dependencies(
     return user_set_member, handler.ApplicationRepo.update_status
 
 
-def test_filling_user_using_forwarded_invite_rejected(
-    app_env, monkeypatch, caplog
-) -> None:
+def test_filling_user_using_forwarded_invite_rejected(app_env, monkeypatch, caplog) -> None:
     handler = import_module("bot.handlers.chat_events")
     session = AsyncMock()
     event = _join_event()
@@ -254,9 +252,7 @@ def test_invite_bound_to_user_id(app_env, monkeypatch, caplog) -> None:
     assert "invite_user_id=111" in caplog.text
 
     bot = AsyncMock()
-    bot.create_chat_invite_link.return_value = SimpleNamespace(
-        invite_link="https://t.me/+bound"
-    )
+    bot.create_chat_invite_link.return_value = SimpleNamespace(invite_link="https://t.me/+bound")
 
     invite_link = asyncio.run(
         invite_service.create_invite(

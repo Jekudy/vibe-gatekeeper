@@ -18,7 +18,9 @@ def _clear_modules() -> None:
             sys.modules.pop(name, None)
 
 
-DEFAULT_LOCAL_POSTGRES_URL = "postgresql+asyncpg://shkoder_dev:shkoder_dev@127.0.0.1:5433/shkoder_dev"
+DEFAULT_LOCAL_POSTGRES_URL = (
+    "postgresql+asyncpg://shkoder_dev:shkoder_dev@127.0.0.1:5433/shkoder_dev"
+)
 
 
 @pytest.fixture()
@@ -67,6 +69,7 @@ def import_module(name: str):
 # If postgres is unreachable, DB-backed tests are SKIPPED (not failed) so that contributors
 # without local postgres can still run the unit suite. CI runs against a real postgres
 # service container, so missed coverage is caught before merge.
+
 
 def _resolve_test_postgres_url() -> str:
     return (

@@ -79,9 +79,7 @@ def test_config_no_password_dev_warns(
     assert "WEB_PASSWORD is not set" in caplog.text
 
 
-def test_config_no_session_secret_prod_raises(
-    app_env, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_config_no_session_secret_prod_raises(app_env, monkeypatch: pytest.MonkeyPatch) -> None:
     config = import_module("bot.config")
     Settings = config.Settings
     monkeypatch.setenv("WEB_PASSWORD", VALID_WEB_PASSWORD)
@@ -123,9 +121,7 @@ def test_config_explicit_password_used(app_env, monkeypatch: pytest.MonkeyPatch)
     assert settings.WEB_PASSWORD == "explicit-pass"
 
 
-def test_empty_web_session_secret_prod_raises(
-    app_env, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_empty_web_session_secret_prod_raises(app_env, monkeypatch: pytest.MonkeyPatch) -> None:
     config = import_module("bot.config")
     Settings = config.Settings
     monkeypatch.setenv("WEB_PASSWORD", VALID_WEB_PASSWORD)
@@ -139,9 +135,7 @@ def test_empty_web_session_secret_prod_raises(
         Settings()
 
 
-def test_short_web_session_secret_prod_raises(
-    app_env, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_short_web_session_secret_prod_raises(app_env, monkeypatch: pytest.MonkeyPatch) -> None:
     config = import_module("bot.config")
     Settings = config.Settings
     monkeypatch.setenv("WEB_PASSWORD", VALID_WEB_PASSWORD)

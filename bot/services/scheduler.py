@@ -122,9 +122,7 @@ async def check_vouch_deadlines(bot: Bot) -> None:
 async def check_intro_refresh(bot: Bot) -> None:
     """Daily job: remind members with stale intros to refresh."""
     async with async_session() as session:
-        stale_intros = await IntroRepo.get_stale_intros(
-            session, settings.INTRO_REFRESH_DAYS
-        )
+        stale_intros = await IntroRepo.get_stale_intros(session, settings.INTRO_REFRESH_DAYS)
         now = datetime.now(timezone.utc)
 
         for intro in stale_intros:
@@ -182,9 +180,7 @@ async def check_intro_refresh(bot: Bot) -> None:
 
             if should_send:
                 try:
-                    await bot.send_message(
-                        chat_id=intro.user_id, text=REFRESH_PROMPT
-                    )
+                    await bot.send_message(chat_id=intro.user_id, text=REFRESH_PROMPT)
                     tracking.reminders_sent += 1
                     tracking.last_reminder_at = now
                     await session.flush()
@@ -201,6 +197,7 @@ async def sync_google_sheets() -> None:
     """Sync intros with Google Sheets (full bi-directional sync)."""
     try:
         from bot.services.sheets import full_sync
+
         await full_sync()
     except ImportError:
         logger.debug("gspread not installed — skipping Google Sheets sync")

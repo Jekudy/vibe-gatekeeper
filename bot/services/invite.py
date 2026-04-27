@@ -43,7 +43,5 @@ async def try_send_invite(
         )
         return True, invite_link
     except (TelegramForbiddenError, TelegramBadRequest) as exc:
-        logger.warning(
-            "Cannot DM user %s for app %s: %s", user_id, app_id, exc
-        )
+        logger.warning("Cannot DM user %s for app %s: %s", user_id, app_id, exc)
         return False, None

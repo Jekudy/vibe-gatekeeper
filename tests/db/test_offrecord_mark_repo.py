@@ -41,9 +41,7 @@ async def _make_chat_message(db_session) -> int:
         first_name="T",
         last_name=None,
     )
-    msg = ChatMessage(
-        message_id=message_id, chat_id=chat_id, user_id=user_id, text="hi", date=when
-    )
+    msg = ChatMessage(message_id=message_id, chat_id=chat_id, user_id=user_id, text="hi", date=when)
     db_session.add(msg)
     await db_session.flush()
     return msg.id
@@ -126,9 +124,7 @@ async def test_cascade_delete_when_message_deleted(db_session) -> None:
         detected_by="x",
     )
 
-    await db_session.execute(
-        ChatMessage.__table__.delete().where(ChatMessage.id == msg_id)
-    )
+    await db_session.execute(ChatMessage.__table__.delete().where(ChatMessage.id == msg_id))
     await db_session.flush()
 
     rows = await db_session.execute(

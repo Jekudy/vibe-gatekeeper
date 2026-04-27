@@ -18,15 +18,11 @@ class ApplicationRepo:
 
     @staticmethod
     async def get(session: AsyncSession, app_id: int) -> Application | None:
-        result = await session.execute(
-            select(Application).where(Application.id == app_id)
-        )
+        result = await session.execute(select(Application).where(Application.id == app_id))
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def get_active(
-        session: AsyncSession, user_id: int
-    ) -> Application | None:
+    async def get_active(session: AsyncSession, user_id: int) -> Application | None:
         result = await session.execute(
             select(Application)
             .where(
@@ -39,9 +35,7 @@ class ApplicationRepo:
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def get_last_rejected(
-        session: AsyncSession, user_id: int
-    ) -> Application | None:
+    async def get_last_rejected(session: AsyncSession, user_id: int) -> Application | None:
         result = await session.execute(
             select(Application)
             .where(
@@ -58,9 +52,7 @@ class ApplicationRepo:
         session: AsyncSession, app_id: int, status: str, **extra_fields
     ) -> None:
         values: dict = {"status": status, **extra_fields}
-        await session.execute(
-            update(Application).where(Application.id == app_id).values(**values)
-        )
+        await session.execute(update(Application).where(Application.id == app_id).values(**values))
         await session.flush()
 
     @staticmethod
@@ -82,9 +74,7 @@ class ApplicationRepo:
         return result.rowcount > 0
 
     @staticmethod
-    async def get_pending_older_than(
-        session: AsyncSession, hours: int
-    ) -> list[Application]:
+    async def get_pending_older_than(session: AsyncSession, hours: int) -> list[Application]:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         result = await session.execute(
             select(Application).where(
@@ -110,7 +100,6 @@ class ApplicationRepo:
     @staticmethod
     async def get_funnel_stats(session: AsyncSession) -> dict:
         result = await session.execute(
-            select(Application.status, func.count())
-            .group_by(Application.status)
+            select(Application.status, func.count()).group_by(Application.status)
         )
         return dict(result.all())

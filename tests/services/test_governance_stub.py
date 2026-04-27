@@ -15,6 +15,7 @@ pytestmark = pytest.mark.usefixtures("app_env")
 
 # ─── detect_policy: normal ─────────────────────────────────────────────────────────────────
 
+
 def test_detect_policy_normal_for_plain_text(app_env) -> None:
     from bot.services.governance import detect_policy
 
@@ -32,6 +33,7 @@ def test_detect_policy_normal_for_none_inputs(app_env) -> None:
 
 
 # ─── detect_policy: nomem ──────────────────────────────────────────────────────────────────
+
 
 def test_detect_policy_nomem_in_text(app_env) -> None:
     from bot.services.governance import detect_policy
@@ -64,6 +66,7 @@ def test_detect_policy_nomem_case_insensitive(app_env) -> None:
 
 # ─── detect_policy: offrecord ──────────────────────────────────────────────────────────────
 
+
 def test_detect_policy_offrecord_in_text(app_env) -> None:
     from bot.services.governance import detect_policy
 
@@ -91,6 +94,7 @@ def test_detect_policy_offrecord_case_insensitive(app_env) -> None:
 
 # ─── detect_policy: precedence ─────────────────────────────────────────────────────────────
 
+
 def test_offrecord_takes_precedence_over_nomem(app_env) -> None:
     """Both tokens present → offrecord (stricter wins)."""
     from bot.services.governance import detect_policy
@@ -100,6 +104,7 @@ def test_offrecord_takes_precedence_over_nomem(app_env) -> None:
 
 
 # ─── detect_policy: token boundaries ───────────────────────────────────────────────────────
+
 
 def test_detect_policy_does_not_match_substring_in_word(app_env) -> None:
     """``#nomembership`` and ``#offrecording`` are not the standalone token."""
@@ -134,6 +139,7 @@ def test_detect_policy_matches_with_trailing_punctuation(app_env) -> None:
 
 
 # ─── redact_raw_for_offrecord ──────────────────────────────────────────────────────────────
+
 
 def test_redact_drops_text_caption_entities_from_message(app_env) -> None:
     from bot.services.governance import redact_raw_for_offrecord
@@ -210,6 +216,7 @@ def test_redact_does_not_mutate_input(app_env) -> None:
 
 # ─── redact: channel_post / edited_channel_post (Codex MEDIUM) ─────────────────────────────
 
+
 def test_redact_handles_channel_post(app_env) -> None:
     from bot.services.governance import redact_raw_for_offrecord
 
@@ -251,6 +258,7 @@ def test_redact_handles_edited_channel_post(app_env) -> None:
 
 
 # ─── redact: nested message-shaped fields (Codex HIGH — reply_to_message leak) ─────────────
+
 
 def test_redact_scrubs_reply_to_message_content(app_env) -> None:
     """Codex HIGH: shallow-copy redactor leaked parent content via reply_to_message.

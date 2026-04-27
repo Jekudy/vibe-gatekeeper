@@ -105,9 +105,7 @@ async def get_or_create_live_run(session: AsyncSession) -> IngestionRun:
     existing = await IngestionRunRepo.get_active_live(session)
     if existing is not None:
         return existing
-    return await IngestionRunRepo.create(
-        session, run_type="live", source_name="bot/__main__.py"
-    )
+    return await IngestionRunRepo.create(session, run_type="live", source_name="bot/__main__.py")
 
 
 async def record_update(

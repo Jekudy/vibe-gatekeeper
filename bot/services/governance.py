@@ -43,9 +43,7 @@ def _contains(pattern: re.Pattern[str], value: str | None) -> bool:
     return bool(pattern.search(value))
 
 
-def detect_policy(
-    text: str | None, caption: str | None
-) -> tuple[PolicyOutcome, dict | None]:
+def detect_policy(text: str | None, caption: str | None) -> tuple[PolicyOutcome, dict | None]:
     """Run deterministic detection over text + caption.
 
     Returns ``(policy, mark_payload)``:
@@ -61,9 +59,7 @@ def detect_policy(
     Token matching is case-insensitive. Hashtags must stand alone — ``#nomembership``
     and ``some#nomem`` do NOT match.
     """
-    has_offrecord = _contains(_OFFRECORD_PATTERN, text) or _contains(
-        _OFFRECORD_PATTERN, caption
-    )
+    has_offrecord = _contains(_OFFRECORD_PATTERN, text) or _contains(_OFFRECORD_PATTERN, caption)
     if has_offrecord:
         return (
             "offrecord",

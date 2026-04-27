@@ -68,9 +68,7 @@ async def save_chat_message(
         # still don't write raw_json for caption-only media (no need — caption column
         # is the authoritative store).
         persist_raw_json = (
-            message.model_dump(mode="json", exclude_none=True)
-            if message.text
-            else None
+            message.model_dump(mode="json", exclude_none=True) if message.text else None
         )
         is_redacted_flag = False
 

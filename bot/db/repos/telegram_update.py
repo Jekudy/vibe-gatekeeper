@@ -90,9 +90,7 @@ class TelegramUpdateRepo:
         return row
 
     @staticmethod
-    async def get_by_update_id(
-        session: AsyncSession, update_id: int
-    ) -> TelegramUpdate | None:
+    async def get_by_update_id(session: AsyncSession, update_id: int) -> TelegramUpdate | None:
         result = await session.execute(
             select(TelegramUpdate).where(TelegramUpdate.update_id == update_id)
         )

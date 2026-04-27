@@ -42,6 +42,7 @@ def _random_id() -> int:
 # ``F.forward_origin`` filter that gates the router is a routing concern, not a logic
 # concern; the handler's job is to enforce auth on whatever message it receives.
 
+
 def _forward_message(requester_id: int) -> SimpleNamespace:
     return SimpleNamespace(
         from_user=SimpleNamespace(id=requester_id),
@@ -108,6 +109,7 @@ async def test_regression_forward_lookup_admin_allowed(app_env, monkeypatch) -> 
 
 # ─── T0-02 + T0-03: DB round-trip and idempotency ─────────────────────────────────────────
 
+
 async def test_regression_user_repo_upsert_round_trips(db_session) -> None:
     """Smoke: insert then update via UserRepo.upsert; verify final state by fresh SELECT
     + refresh (the upsert return value can be a stale identity-map cached instance when a
@@ -133,9 +135,7 @@ async def test_regression_user_repo_upsert_round_trips(db_session) -> None:
         last_name="Last",
     )
 
-    fetched = (
-        await db_session.execute(select(User).where(User.id == telegram_id))
-    ).scalar_one()
+    fetched = (await db_session.execute(select(User).where(User.id == telegram_id))).scalar_one()
     await db_session.refresh(fetched)  # force read of latest column values from DB
     assert fetched.username == "probe2"
     assert fetched.first_name == "Probe2"
@@ -191,6 +191,7 @@ async def test_regression_message_repo_save_duplicate_safe(db_session) -> None:
 
 # ─── T0-05: /healthz endpoint reachable ────────────────────────────────────────────────────
 
+
 def test_regression_healthz_returns_a_status(app_env, monkeypatch) -> None:
     """Smoke: /healthz returns 200 OR 503, body has 'status' key, no obvious secret leak.
     Patches ``report()`` to a fixed healthy response so the regression umbrella stays
@@ -213,7 +214,9 @@ def test_regression_healthz_returns_a_status(app_env, monkeypatch) -> None:
     client = TestClient(web_app.create_app())
     response = client.get("/healthz")
 
-    assert response.status_code in (200, 503), "T0-05 regression: /healthz did not return a status code"
+    assert response.status_code in (200, 503), (
+        "T0-05 regression: /healthz did not return a status code"
+    )
     body = response.json()
     assert "status" in body, "T0-05 regression: response body missing 'status' field"
     body_str = json.dumps(body)

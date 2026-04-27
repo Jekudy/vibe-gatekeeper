@@ -35,13 +35,9 @@ class QuestionnaireRepo:
         application_id: int | None = None,
         current_only: bool = True,
     ) -> list[QuestionnaireAnswer]:
-        stmt = select(QuestionnaireAnswer).where(
-            QuestionnaireAnswer.user_id == user_id
-        )
+        stmt = select(QuestionnaireAnswer).where(QuestionnaireAnswer.user_id == user_id)
         if application_id is not None:
-            stmt = stmt.where(
-                QuestionnaireAnswer.application_id == application_id
-            )
+            stmt = stmt.where(QuestionnaireAnswer.application_id == application_id)
         if current_only:
             stmt = stmt.where(QuestionnaireAnswer.is_current.is_(True))
         stmt = stmt.order_by(QuestionnaireAnswer.question_index)
@@ -54,20 +50,14 @@ class QuestionnaireRepo:
         user_id: int,
         application_id: int | None = None,
     ) -> None:
-        stmt = delete(QuestionnaireAnswer).where(
-            QuestionnaireAnswer.user_id == user_id
-        )
+        stmt = delete(QuestionnaireAnswer).where(QuestionnaireAnswer.user_id == user_id)
         if application_id is not None:
-            stmt = stmt.where(
-                QuestionnaireAnswer.application_id == application_id
-            )
+            stmt = stmt.where(QuestionnaireAnswer.application_id == application_id)
         await session.execute(stmt)
         await session.flush()
 
     @staticmethod
-    async def mark_not_current(
-        session: AsyncSession, user_id: int
-    ) -> None:
+    async def mark_not_current(session: AsyncSession, user_id: int) -> None:
         await session.execute(
             update(QuestionnaireAnswer)
             .where(QuestionnaireAnswer.user_id == user_id)
