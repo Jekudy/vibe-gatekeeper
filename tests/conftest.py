@@ -4,9 +4,12 @@ import importlib
 import os
 import sys
 from collections.abc import AsyncIterator, Iterator
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _clear_modules() -> None:
@@ -45,6 +48,10 @@ def app_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 def import_module(name: str):
+    root = str(PROJECT_ROOT)
+    if sys.path[0] != root:
+        sys.path = [path for path in sys.path if path != root]
+        sys.path.insert(0, root)
     return importlib.import_module(name)
 
 

@@ -11,16 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.config import settings
 from bot.db.models import Application
 from bot.db.repos.application import ApplicationRepo
+from bot.db.repos.invite_outbox import InviteOutboxRepo
 from bot.db.repos.user import UserRepo
 from bot.db.repos.vouch import VouchRepo
 from bot.html_escape import html_escape
-from bot.keyboards.inline import ReadyCallback, VouchCallback, ready_keyboard
-from bot.services.invite import try_send_invite
+from bot.keyboards.inline import ReadyCallback, VouchCallback
 from bot.texts import (
     ALREADY_PROCESSED,
     CANT_VOUCH_SELF,
     ONLY_MEMBERS_VOUCH,
-    PRIVACY_BLOCK_MSG,
     VOUCHED_NOTIFICATION,
 )
 
@@ -84,6 +83,12 @@ async def handle_vouch(
         vouchee_id=app.user_id,
         application_id=app_id,
     )
+    await InviteOutboxRepo.create_pending(
+        session,
+        application_id=app_id,
+        user_id=app.user_id,
+        chat_id=settings.COMMUNITY_CHAT_ID,
+    )
 
     # Delete questionnaire message from chat
     if callback.message is not None:
@@ -98,7 +103,7 @@ async def handle_vouch(
                 callback.message.message_id,
             )
 
-    # Notify applicant and send invite
+    # Notify applicant; the invite itself is delivered by the outbox worker after commit.
     voucher_name = f"@{voucher.username}" if voucher.username else voucher.first_name
     try:
         await callback.bot.send_message(
@@ -107,25 +112,6 @@ async def handle_vouch(
         )
     except Exception:
         logger.warning("Failed to notify user %s about vouch", app.user_id)
-
-    # Try to send invite link
-    success, _link = await try_send_invite(
-        callback.bot, settings.COMMUNITY_CHAT_ID, app.user_id, app_id
-    )
-
-    if not success:
-        # Privacy block
-        await ApplicationRepo.update_status(session, app_id, "privacy_block")
-        try:
-            await callback.bot.send_message(
-                chat_id=app.user_id,
-                text=PRIVACY_BLOCK_MSG,
-                reply_markup=ready_keyboard(app_id),
-            )
-        except Exception:
-            logger.warning(
-                "Failed to send privacy block message to user %s", app.user_id
-            )
 
     await callback.answer("Готово! Спасибо за ручательство.")
 
@@ -151,23 +137,18 @@ async def handle_ready(
         await callback.answer("Эта кнопка не для тебя.", show_alert=True)
         return
 
-    # Retry sending invite
-    success, _link = await try_send_invite(
-        callback.bot, settings.COMMUNITY_CHAT_ID, app.user_id, app_id
+    await ApplicationRepo.update_status(
+        session, app_id, "vouched", invite_user_id=app.user_id
+    )
+    await InviteOutboxRepo.create_pending(
+        session,
+        application_id=app_id,
+        user_id=app.user_id,
+        chat_id=settings.COMMUNITY_CHAT_ID,
     )
 
-    if success:
-        await ApplicationRepo.update_status(
-            session, app_id, "vouched", invite_user_id=app.user_id
+    if callback.message is not None:
+        await callback.message.edit_text(
+            "Запрос принят. Инвайт скоро придёт в личные сообщения."
         )
-        if callback.message is not None:
-            await callback.message.edit_text(
-                "Инвайт отправлен! Проверь личные сообщения."
-            )
-        await callback.answer()
-    else:
-        await callback.answer(
-            "Всё ещё не удаётся отправить инвайт. "
-            "Проверь настройки приватности и попробуй снова.",
-            show_alert=True,
-        )
+    await callback.answer()
