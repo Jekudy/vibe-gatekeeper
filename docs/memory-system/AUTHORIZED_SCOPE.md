@@ -185,6 +185,29 @@ Telegram Desktop import has two modes:
   skeleton both exist. Apply must use the same normalization + governance path as live Telegram
   updates.
 
+### Edit history during import (Phase 2 apply binding rule)
+
+Telegram Desktop export stores only the **final state** of edited messages — no v1/v2 chain is
+available. This is a structural constraint of the TD export format (documented in
+`docs/memory-system/telegram-desktop-export-schema.md §4` and
+`docs/memory-system/import-edit-history.md §2`).
+
+**Binding rule for #103 (Stream Delta — import apply):**
+
+1. Every imported `message_versions` row MUST be created with
+   `imported_final = TRUE` (Boolean column, added by the #103 migration).
+   This applies to all imported rows, not only those with the `edited` field set.
+   `imported_final = TRUE` means "constructed from a static archive; live edit-chain
+   knowledge is absent."
+   Detailed policy rationale and implementation surface: `docs/memory-system/import-edit-history.md`.
+
+2. This rule does NOT change `#offrecord` discipline. Every imported message — regardless of
+   `imported_final` — still routes through `governance.detect_policy` exactly like a live
+   message, in the same transaction as the content write.
+
+3. Implementation (migration + write logic) lands in #103 / Stream Delta.
+   This sprint (#106) is doc-only.
+
 ---
 
 ## `allowed_updates` rollout rule
