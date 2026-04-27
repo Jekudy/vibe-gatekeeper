@@ -356,7 +356,7 @@ async def test_save_duplicate_with_only_policy_does_not_clobber_is_redacted(db_s
 
 
 async def test_save_duplicate_does_not_overwrite_text_when_refreshing_policy(db_session) -> None:
-    """AC4 irreversibility doctrine: text (and other content fields) must stay immutable
+    """AC4 irreversibility doctrine: text, caption, and raw_json must stay immutable
     even when policy fields are being refreshed on a duplicate delivery."""
     from bot.db.repos.message import MessageRepo
 
@@ -374,6 +374,8 @@ async def test_save_duplicate_does_not_overwrite_text_when_refreshing_policy(db_
         user_id=user_id,
         text="original",
         date=when,
+        caption="cap-A",
+        raw_json={"k": "a"},
     )
 
     second = await MessageRepo.save(
@@ -383,9 +385,64 @@ async def test_save_duplicate_does_not_overwrite_text_when_refreshing_policy(db_
         user_id=user_id,
         text="attacker",
         date=when,
+        caption="cap-B",
+        raw_json={"k": "b"},
         memory_policy="offrecord",
         is_redacted=True,
     )
 
     assert second.text == "original"
     assert second.memory_policy == "offrecord"
+    # caption must not be overwritten on conflict — immutable alongside text.
+    assert second.caption == "cap-A"
+    # raw_json must not be overwritten on conflict — immutable alongside text.
+    assert second.raw_json == {"k": "a"}
+
+
+async def test_save_duplicate_with_only_policy_normal_does_not_unflip_redacted(
+    db_session,
+) -> None:
+    """Asymmetric privacy invariant: ``is_redacted=True`` must NEVER be flipped back
+    to ``False`` by a policy-only re-save that does not explicitly pass ``is_redacted``.
+
+    Scenario: a message was first saved as offrecord (is_redacted=True). A duplicate
+    delivery arrives with memory_policy='normal' only — no ``is_redacted`` kwarg. The
+    ``set_clause`` selectivity in MessageRepo.save must leave ``is_redacted`` at True
+    because the caller did not declare intent to change it.
+    """
+    from bot.db.repos.message import MessageRepo
+
+    user_id = _random_user_id()
+    chat_id = _random_chat_id()
+    message_id = _random_message_id()
+    when = datetime.now(timezone.utc)
+
+    await _create_user(db_session, user_id)
+
+    # Insert with memory_policy='offrecord', is_redacted=True.
+    await MessageRepo.save(
+        db_session,
+        message_id=message_id,
+        chat_id=chat_id,
+        user_id=user_id,
+        text="secret",
+        date=when,
+        memory_policy="offrecord",
+        is_redacted=True,
+    )
+
+    # Duplicate with memory_policy='normal' only — no is_redacted kwarg.
+    second = await MessageRepo.save(
+        db_session,
+        message_id=message_id,
+        chat_id=chat_id,
+        user_id=user_id,
+        text="secret",
+        date=when,
+        memory_policy="normal",
+    )
+
+    # memory_policy changed (caller declared it).
+    assert second.memory_policy == "normal"
+    # is_redacted must remain True — the caller did not declare it, so it must not flip back.
+    assert second.is_redacted is True
