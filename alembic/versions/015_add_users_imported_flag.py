@@ -12,8 +12,8 @@ by the gatekeeper flow also default to False. Only the import service sets this 
 The sparse partial index ``ix_users_is_imported_only_true`` covers only True rows, keeping
 it small since the overwhelming majority of rows are live users (is_imported_only=False).
 
-Revision ID: 013
-Revises: 012
+Revision ID: 015
+Revises: 014
 Create Date: 2026-04-27
 """
 
@@ -24,8 +24,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "013"
-down_revision: Union[str, Sequence[str], None] = "012"
+revision: str = "015"
+down_revision: Union[str, Sequence[str], None] = "014"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
