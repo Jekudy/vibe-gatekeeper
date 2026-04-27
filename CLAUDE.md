@@ -34,9 +34,19 @@ Vibe Gatekeeper is a Telegram + web gatekeeping system for managing community ap
 
 ## Memory System Cycle (active 2026-04-26+)
 
-A multi-phase migration from gatekeeper → governed community memory is in progress on a
-separate worktree (`feat/memory-foundation`). Read these BEFORE touching anything under
-`bot/db/`, `bot/services/`, `bot/handlers/chat_messages.py`, or adding `alembic/versions/`:
+Phase 1 (foundation: raw archive, message_versions, governance detector, edited_message
+handler) **CLOSED 2026-04-27**. Phase 2 (importer + governance skeleton) is in progress
+on three parallel stream worktrees:
+
+- `.worktrees/p2-alpha` (`phase/p2-alpha`) — Stream Alpha (MessageRepo policy refresh /
+  persist_message_with_policy helper)
+- `.worktrees/p2-bravo` (`phase/p2-bravo`) — Stream Bravo (Telegram Desktop import schema /
+  user mapping / dry-run parser)
+- `.worktrees/p2-charlie` (`phase/p2-charlie`) — Stream Charlie (governance skeleton:
+  forget_events, /forget command, cascade worker, /forget_me)
+
+Read these BEFORE touching anything under `bot/db/`, `bot/services/`,
+`bot/handlers/chat_messages.py`, or adding `alembic/versions/`:
 
 1. `docs/memory-system/AUTHORIZED_SCOPE.md` — what is allowed in the immediate cycle
    (Phase 0 + Phase 1). What is **not** authorized. Critical safety rule for `#offrecord`.
