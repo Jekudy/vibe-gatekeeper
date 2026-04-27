@@ -94,6 +94,8 @@ async def test_backfill_creates_v1_for_each_legacy_row(db_session) -> None:
         assert v.version_seq == 1
         assert v.content_hash is not None
         assert len(v.content_hash) == 64  # sha256 hex
+        # captured_at must be pinned to msg.date (HANDOFF.md §6 #5 + issue #31).
+        assert v.captured_at == msg.date
 
 
 # ─── idempotency ───────────────────────────────────────────────────────────────────────────

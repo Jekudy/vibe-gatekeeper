@@ -45,7 +45,12 @@ async def _run_async_backfill() -> int:
     Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     try:
         async with Session() as session:
-            count = await backfill_v1_message_versions(session)
+            # commit_per_batch=True so a 50k-row backfill does not hold one giant
+            # transaction. Tests use the default (False) with outer-tx rollback for
+            # isolation.
+            count = await backfill_v1_message_versions(session, commit_per_batch=True)
+            # Final commit covers the (possibly partial) trailing batch that did not
+            # reach the per-batch commit branch.
             await session.commit()
             return count
     finally:
