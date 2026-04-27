@@ -64,12 +64,13 @@ class MessageVersionRepo:
         exists; otherwise creates a new row at ``version_seq = max + 1``. Flushes; does
         not commit.
 
-        The check-then-create pattern is safe in this codebase because the bot is
-        deployed single-instance (one polling consumer per environment, see HANDOFF.md
-        §0). If we ever go multi-instance, the unique constraint
-        ``uq_message_versions_chat_message_seq`` would catch concurrent v(n+1) creation
-        with an ``IntegrityError``, which the caller can recover from by retrying the
-        ``get_max_version_seq`` lookup.
+        Concurrency: the check-then-create pattern is safe in this codebase because the
+        bot is deployed single-instance (one polling consumer per environment, see
+        HANDOFF.md §0). If we ever go multi-instance, two concurrent calls reading the
+        same ``max`` and inserting the same ``version_seq`` would lose the race at the
+        unique constraint ``uq_message_versions_chat_message_seq`` and surface as
+        ``IntegrityError`` — the caller would have to handle it. No retry is built in;
+        adding it is left for the multi-instance migration.
         """
         existing = await MessageVersionRepo.get_by_hash(
             session, chat_message_id, content_hash
