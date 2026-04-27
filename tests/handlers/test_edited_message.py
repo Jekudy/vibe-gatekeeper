@@ -296,6 +296,92 @@ def test_edit_normal_to_offrecord_flip_zero_out(app_env, monkeypatch) -> None:
     mock_insert_version.assert_not_awaited()
 
 
+def test_apply_offrecord_flip_redacts_existing_message_versions(app_env) -> None:
+    """Phase 1 final-review CRITICAL (Codex PRIVACY_LEAK_CLASS_4): on a normal→offrecord
+    flip ``_apply_offrecord_flip`` must redact every existing ``message_versions`` row of
+    the parent — not only the parent ``chat_messages`` row. Without this, historical v1
+    (T1-07 backfill) and any prior v(n+1) rows still contain raw text/caption after the
+    user has scoped the message ``#offrecord``.
+
+    Captures all ``session.execute`` calls and asserts there is at least one UPDATE
+    statement targeting the ``MessageVersion`` table whose values dict nulls out
+    ``text``, ``caption``, ``normalized_text``, and ``entities_json`` and sets
+    ``is_redacted=True``.
+    """
+    import asyncio
+
+    from sqlalchemy import update as sa_update
+
+    handler = import_module("bot.handlers.edited_message")
+    MessageVersion = handler.MessageVersion
+    ChatMessage = handler.ChatMessage
+
+    captured: list[dict] = []
+
+    async def capture_execute(stmt, *args, **kwargs):
+        try:
+            target = stmt.table.name if hasattr(stmt, "table") else None
+        except Exception:
+            target = None
+        try:
+            values = dict(getattr(stmt, "_values", {}) or {})
+            captured.append(
+                {
+                    "target": target,
+                    "values": {
+                        str(k.key) if hasattr(k, "key") else str(k): v for k, v in values.items()
+                    },
+                }
+            )
+        except Exception:  # pragma: no cover — defensive
+            captured.append({"target": target, "values": {}})
+        return MagicMock()
+
+    row = MagicMock()
+    row.id = 42
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=capture_execute)
+    session.flush = AsyncMock()
+
+    asyncio.run(
+        handler._apply_offrecord_flip(
+            session,
+            row,
+            mark_payload={"detected_by": "deterministic_token_match_v1"},
+            set_by_user_id=999,
+            thread_id=None,
+        )
+    )
+
+    # Find the UPDATE against message_versions specifically.
+    version_updates = [c for c in captured if c["target"] == "message_versions"]
+    assert version_updates, (
+        "CRITICAL PRIVACY LEAK: _apply_offrecord_flip did not issue an UPDATE on "
+        "message_versions — historical version rows would retain raw content after "
+        "the offrecord flip. Captured statements: %r" % captured
+    )
+
+    def _unwrap(v):
+        # Values in stmt._values are BindParameter objects; pull .value or .effective_value.
+        for attr in ("value", "effective_value"):
+            if hasattr(v, attr):
+                return getattr(v, attr)
+        return v
+
+    for u in version_updates:
+        v = u["values"]
+        assert _unwrap(v.get("text")) is None, f"text not nulled: {v}"
+        assert _unwrap(v.get("caption")) is None, f"caption not nulled: {v}"
+        assert _unwrap(v.get("normalized_text")) is None, f"normalized_text not nulled: {v}"
+        assert _unwrap(v.get("entities_json")) is None, f"entities_json not nulled: {v}"
+        assert _unwrap(v.get("is_redacted")) is True, f"is_redacted not set: {v}"
+
+    # Reference variables to silence linters about unused imports needed for the
+    # MessageVersion / ChatMessage attribute lookups inside the handler.
+    _ = (sa_update, MessageVersion, ChatMessage)
+
+
 # ─── Test 4: offrecord → normal flip: no content restoration ─────────────────
 
 

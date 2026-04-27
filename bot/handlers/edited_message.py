@@ -44,7 +44,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
-from bot.db.models import ChatMessage
+from bot.db.models import ChatMessage, MessageVersion
 from bot.db.repos.message_version import MessageVersionRepo
 from bot.db.repos.offrecord_mark import OffrecordMarkRepo
 from bot.filters.chat_type import GroupChatFilter
@@ -123,8 +123,14 @@ async def _apply_offrecord_flip(
 ) -> None:
     """Retroactively redact content and create offrecord_marks row in the same transaction.
 
-    Called when the edit flips the policy to 'offrecord'. Nulls content fields,
-    sets is_redacted=True, memory_policy='offrecord' on the chat_messages row.
+    Called when the edit flips the policy to 'offrecord'. Nulls content fields and sets
+    ``is_redacted=True``, ``memory_policy='offrecord'`` on the chat_messages parent row.
+    Also nulls content on every existing ``message_versions`` row of this chat_message —
+    this closes Codex Phase 1 final-review CRITICAL "PRIVACY_LEAK_CLASS_4": without it,
+    historical version rows (created via T1-07 backfill or earlier non-offrecord edits)
+    would still contain the raw text/caption after the user has scoped the message
+    `#offrecord`, breaking the Phase 1 invariant.
+
     Creates offrecord_marks audit row. All in the same session (no commit).
     """
     await session.execute(
@@ -136,6 +142,24 @@ async def _apply_offrecord_flip(
             raw_json=None,
             is_redacted=True,
             memory_policy="offrecord",
+        )
+    )
+    # Privacy invariant: scrub every existing message_versions row of this chat_message.
+    # We null all content surfaces (text, caption, normalized_text, entities_json) and
+    # mark the row redacted. ``content_hash`` is intentionally LEFT INTACT — citations
+    # in extracted facts (Phase 4+) keyed on content_hash continue to resolve and the
+    # is_redacted flag tells the consumer "this version's content was scoped, do not
+    # surface". A future cleanup may also replace content_hash with the redacted-state
+    # hash, but that would invalidate prior citations and is deferred.
+    await session.execute(
+        update(MessageVersion)
+        .where(MessageVersion.chat_message_id == row.id)
+        .values(
+            text=None,
+            caption=None,
+            normalized_text=None,
+            entities_json=None,
+            is_redacted=True,
         )
     )
     await session.flush()
