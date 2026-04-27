@@ -94,6 +94,13 @@ async def get_or_create_live_run(session: AsyncSession) -> IngestionRun:
     HANDOFF.md §7 names this method on the ingestion service, not on the repo. The
     repo only does the read half (``get_active_live``); the write half (create on
     miss) lives here so the repo stays a thin data-access layer.
+
+    Concurrency caveat: this is a check-then-create without locking. The bot is
+    deployed single-instance per environment (one polling consumer per token, see
+    HANDOFF.md §0 "Recommended execution mode"), so two startups in the same DB
+    cannot race in normal operation. If we ever go multi-instance, this needs an
+    advisory lock or an upsert-on-conflict pattern with a partial unique index over
+    ``(run_type='live', status='running')``.
     """
     existing = await IngestionRunRepo.get_active_live(session)
     if existing is not None:

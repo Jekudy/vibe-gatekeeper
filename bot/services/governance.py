@@ -22,7 +22,8 @@ PolicyOutcome = Literal["normal", "nomem", "offrecord"]
 
 
 def detect_policy(
-    text: str | None, caption: str | None
+    text: str | None,  # noqa: ARG001 — stub unused; T1-12 reads this
+    caption: str | None,  # noqa: ARG001 — stub unused; T1-12 reads this
 ) -> tuple[PolicyOutcome, dict | None]:
     """Return ``('normal', None)`` for any input.
 
@@ -30,8 +31,6 @@ def detect_policy(
     ``offrecord_marks`` payload dict when the policy is ``'offrecord'`` so the caller
     can persist the audit row in the same transaction.
     """
-    # Stub — see module docstring. Args intentionally unused.
-    del text, caption
     return ("normal", None)
 
 
