@@ -1,7 +1,7 @@
 # Memory System — Implementation Status
 
 **Last updated:** 2026-04-27 (Phase 2 — Stream Alpha sprint #67, Stream Charlie sprint T3-01)
-**Branch:** `feat/memory-foundation` (worktree `.worktrees/memory`)
+**Active worktrees (Phase 2):** `.worktrees/p2-alpha` (`phase/p2-alpha`), `.worktrees/p2-bravo` (`phase/p2-bravo`), `.worktrees/p2-charlie` (`phase/p2-charlie`). Phase 1 closed on `main` 2026-04-27.
 **Source of truth:** this file is updated after every PR merge into `main`.
 
 ---
