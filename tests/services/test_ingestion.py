@@ -11,12 +11,21 @@ Covers the BLOCKER cross-cutting requirement from AUTHORIZED_SCOPE.md:
 
 from __future__ import annotations
 
-import random
+import itertools
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import select
 
 pytestmark = pytest.mark.usefixtures("app_env")
+
+# Deterministic update_id generator. Each test session gets a fresh sequence starting at
+# the high range that never collides with real Telegram update_ids in fixtures.
+_test_update_id_counter = itertools.count(start=8_000_000_000)
+
+
+def _next_update_id() -> int:
+    return next(_test_update_id_counter)
 
 
 def _make_message_update(
@@ -30,7 +39,7 @@ def _make_message_update(
     ingestion service to extract chat/message ids, text, caption, and update_id."""
     from aiogram.types import Chat, Message, Update, User
 
-    when = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+    when = datetime.now(timezone.utc)
     chat = Chat(id=chat_id, type="supergroup", title="dev")
     user = User(id=user_id, is_bot=False, first_name="Probe")
     msg = Message(
@@ -40,11 +49,7 @@ def _make_message_update(
         from_user=user,
         text=text,
     )
-    return Update(update_id=update_id or random.randint(1_000_000_000, 9_999_999_999), message=msg)
-
-
-def _random_id() -> int:
-    return random.randint(1_000_000_000, 9_999_999_999)
+    return Update(update_id=update_id if update_id is not None else _next_update_id(), message=msg)
 
 
 # ─── flag gating ────────────────────────────────────────────────────────────────────────
@@ -53,7 +58,7 @@ async def test_record_update_returns_none_when_flag_off(db_session) -> None:
     from bot.db.models import TelegramUpdate
     from bot.services.ingestion import record_update
 
-    update = _make_message_update(update_id=_random_id())
+    update = _make_message_update(update_id=_next_update_id())
     result = await record_update(db_session, update)
 
     assert result is None
@@ -69,7 +74,7 @@ async def test_record_update_inserts_row_when_flag_on(db_session) -> None:
 
     await FeatureFlagRepo.set_enabled(db_session, RAW_ARCHIVE_FLAG, enabled=True)
 
-    update = _make_message_update(update_id=_random_id(), text="hi")
+    update = _make_message_update(update_id=_next_update_id(), text="hi")
     row = await record_update(db_session, update)
 
     assert row is not None
@@ -88,7 +93,7 @@ async def test_record_update_idempotent_on_duplicate_update_id(db_session) -> No
 
     await FeatureFlagRepo.set_enabled(db_session, RAW_ARCHIVE_FLAG, enabled=True)
 
-    update = _make_message_update(update_id=_random_id(), text="first")
+    update = _make_message_update(update_id=_next_update_id(), text="first")
     first = await record_update(db_session, update)
     second = await record_update(db_session, update)
 
@@ -143,11 +148,50 @@ async def test_record_update_calls_detect_policy_stub(db_session, monkeypatch) -
 
     monkeypatch.setattr(ingestion, "detect_policy", _spy_detect)
 
-    update = _make_message_update(update_id=_random_id(), text="payload")
+    update = _make_message_update(update_id=_next_update_id(), text="payload")
     await ingestion.record_update(db_session, update)
 
     assert len(calls) == 1
     assert calls[0] == ("payload", None)
+
+
+async def test_record_update_calls_detect_policy_BEFORE_insert(db_session, monkeypatch) -> None:
+    """Critical privacy invariant from AUTHORIZED_SCOPE §`#offrecord` ordering rule:
+    ``detect_policy`` MUST be called BEFORE ``TelegramUpdateRepo.insert``. If the order
+    swaps (insert first, detect after), an `#offrecord` message would have its raw_json
+    persisted unredacted before redaction logic runs.
+
+    This test pins the order via call-sequence spies. T1-12 swap of the detector keeps
+    this contract intact."""
+    from bot.db.repos import telegram_update as tu_repo_module
+    from bot.db.repos.feature_flag import FeatureFlagRepo
+    from bot.services import ingestion
+
+    await FeatureFlagRepo.set_enabled(db_session, ingestion.RAW_ARCHIVE_FLAG, enabled=True)
+
+    call_order: list[str] = []
+
+    def _spy_detect(text, caption):
+        call_order.append("detect_policy")
+        return ("normal", None)
+
+    original_insert = tu_repo_module.TelegramUpdateRepo.insert
+
+    @staticmethod
+    async def _spy_insert(session, **kwargs):
+        call_order.append("insert")
+        return await original_insert(session, **kwargs)
+
+    monkeypatch.setattr(ingestion, "detect_policy", _spy_detect)
+    monkeypatch.setattr(tu_repo_module.TelegramUpdateRepo, "insert", _spy_insert)
+
+    update = _make_message_update(update_id=_next_update_id(), text="payload")
+    await ingestion.record_update(db_session, update)
+
+    assert call_order == ["detect_policy", "insert"], (
+        f"#offrecord ordering rule violated: expected detect_policy before insert, "
+        f"got {call_order}"
+    )
 
 
 # ─── classifier helpers ─────────────────────────────────────────────────────────────────
