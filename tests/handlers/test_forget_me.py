@@ -17,9 +17,10 @@ Tests:
 from __future__ import annotations
 
 import asyncio
+import itertools
 import random
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -110,8 +111,14 @@ def test_forget_me_creates_user_event_for_known_user(app_env, monkeypatch) -> No
 
 
 def test_forget_me_unknown_user_no_event(app_env, monkeypatch) -> None:
-    """Telegram user not in users table: silent return (or 'not registered' reply),
-    no forget_events row created."""
+    """Telegram user not in users table: silent return — no event created and
+    no reply sent.
+
+    The handler does a silent return (no reply) for unknown users, which is the
+    correct privacy choice: sending any response would leak membership information
+    via differential UX (registered users get a confirmation; unregistered get
+    silence vs. an error message).
+    """
     handler = import_module("bot.handlers.forget_me")
 
     message = _make_message()
@@ -128,38 +135,55 @@ def test_forget_me_unknown_user_no_event(app_env, monkeypatch) -> None:
 
     # No event must be created for unregistered users
     mock_create_event.assert_not_awaited()
+    # Privacy: NO reply sent — silence prevents membership leakage via differential UX
+    message.reply.assert_not_awaited()
 
 
 # ─── Test 3: idempotent — second call returns same event id ──────────────────
 
 
 def test_forget_me_idempotent_returns_same_event(app_env, monkeypatch) -> None:
-    """Call /forget_me twice: second call returns same forget_events.id, no duplicate."""
+    """Call /forget_me twice: second call returns same forget_events.id, no duplicate.
+
+    The mock ForgetEventRepo.create returns the same row both times (idempotent
+    ON CONFLICT behaviour). The handler reply must reference the same event id both
+    times, proving the handler surfaces the repo-returned id, not a newly minted one.
+    """
     handler = import_module("bot.handlers.forget_me")
 
     tg_id = _random_tg_id()
-    message = _make_message(tg_id=tg_id)
+    # Use two separate message objects so each call gets its own reply mock.
+    message_1 = _make_message(tg_id=tg_id)
+    message_2 = _make_message(tg_id=tg_id)
     user_row = _make_user_row(tg_id=tg_id)
-    event_row = _make_forget_event_row(event_id=99, user_id=tg_id, tg_id=tg_id)
+    event_row = _make_forget_event_row(event_id=42, user_id=tg_id, tg_id=tg_id)
 
     session = AsyncMock()
     session.scalar = AsyncMock(return_value=3)
 
     mock_get_user = AsyncMock(return_value=user_row)
-    # ForgetEventRepo.create is idempotent — returns same row both times
+    # ForgetEventRepo.create is idempotent — returns same row (same .id) both times
     mock_create_event = AsyncMock(return_value=event_row)
 
     monkeypatch.setattr(handler.UserRepo, "get", mock_get_user)
     monkeypatch.setattr(handler.ForgetEventRepo, "create", mock_create_event)
 
-    asyncio.run(handler.handle_forget_me(message, session))
-    asyncio.run(handler.handle_forget_me(message, session))
+    asyncio.run(handler.handle_forget_me(message_1, session))
+    asyncio.run(handler.handle_forget_me(message_2, session))
 
     # create called twice (idempotency is inside the repo's ON CONFLICT logic)
     assert mock_create_event.await_count == 2
     # Both calls used same tombstone_key → repo returns same row → same event id
     for call in mock_create_event.call_args_list:
         assert call.kwargs["tombstone_key"] == f"user:{tg_id}"
+
+    # Both replies must reference the SAME event id (42), not a different one.
+    reply_text_1 = message_1.reply.call_args[0][0]
+    reply_text_2 = message_2.reply.call_args[0][0]
+    assert "event #42" in reply_text_1, f"Expected 'event #42' in first reply: {reply_text_1!r}"
+    assert "event #42" in reply_text_2, f"Expected 'event #42' in second reply: {reply_text_2!r}"
+    # Sanity check: _count_user_messages (session.scalar) called once per invocation
+    assert session.scalar.await_count == 2
 
 
 # ─── Test 4: reply includes message count ────────────────────────────────────
@@ -231,8 +255,6 @@ def test_forget_me_does_not_run_cascade(app_env, monkeypatch) -> None:
 
 # ─── DB-backed tests ──────────────────────────────────────────────────────────
 
-import itertools
-
 _user_counter = itertools.count(start=8_200_000_000)
 
 
@@ -276,23 +298,42 @@ async def test_forget_me_db_creates_event_known_user(db_session) -> None:
 
 
 async def test_forget_me_db_idempotent(db_session) -> None:
-    """DB-backed: two /forget_me calls produce exactly one forget_events row."""
+    """DB-backed: two /forget_me calls produce exactly one forget_events row,
+    and both calls return the same forget_events.id."""
     handler = import_module("bot.handlers.forget_me")
     tg_id = await _make_db_user(db_session)
-    message = _make_message(tg_id=tg_id)
-
-    await handler.handle_forget_me(message, db_session)
-    await handler.handle_forget_me(message, db_session)
+    message_1 = _make_message(tg_id=tg_id)
+    message_2 = _make_message(tg_id=tg_id)
 
     from sqlalchemy import func, select
+
     from bot.db.models import ForgetEvent
 
+    # First call
+    await handler.handle_forget_me(message_1, db_session)
+    first_id = await db_session.scalar(
+        select(ForgetEvent.id).where(ForgetEvent.tombstone_key == f"user:{tg_id}")
+    )
+    assert first_id is not None, "No forget_events row created after first call"
+
+    # Second call (idempotent)
+    await handler.handle_forget_me(message_2, db_session)
+    second_id = await db_session.scalar(
+        select(ForgetEvent.id).where(ForgetEvent.tombstone_key == f"user:{tg_id}")
+    )
+
+    # Exactly one row must exist
     count = await db_session.scalar(
         select(func.count(ForgetEvent.id)).where(
             ForgetEvent.tombstone_key == f"user:{tg_id}"
         )
     )
-    assert count == 1
+    assert count == 1, f"Expected 1 forget_events row, got {count}"
+
+    # Both calls must reference the SAME row id
+    assert first_id == second_id, (
+        f"Idempotency violation: first_id={first_id} != second_id={second_id}"
+    )
 
 
 async def test_forget_me_db_does_not_cascade(db_session) -> None:
@@ -302,7 +343,6 @@ async def test_forget_me_db_does_not_cascade(db_session) -> None:
     from sqlalchemy import select
 
     from bot.db.models import ChatMessage
-    from bot.db.repos.user import UserRepo
 
     handler = import_module("bot.handlers.forget_me")
     tg_id = await _make_db_user(db_session)
