@@ -24,9 +24,10 @@ def _is_join(update: ChatMemberUpdated) -> bool:
     """Check if this update represents a user joining the chat."""
     old = update.old_chat_member
     new = update.new_chat_member
-    return (
-        old.status in ("left", "kicked", "restricted")
-        and new.status in ("member", "administrator", "creator")
+    return old.status in ("left", "kicked", "restricted") and new.status in (
+        "member",
+        "administrator",
+        "creator",
     )
 
 
@@ -34,10 +35,7 @@ def _is_leave(update: ChatMemberUpdated) -> bool:
     """Check if this update represents a user leaving the chat."""
     old = update.old_chat_member
     new = update.new_chat_member
-    return (
-        old.status in ("member", "administrator", "creator")
-        and new.status in ("left", "kicked")
-    )
+    return old.status in ("member", "administrator", "creator") and new.status in ("left", "kicked")
 
 
 def _admission_rejection_reason(active_app, user_id: int) -> str | None:
@@ -46,10 +44,7 @@ def _admission_rejection_reason(active_app, user_id: int) -> str | None:
     if active_app.status != "vouched":
         return f"application {active_app.id} status={active_app.status!r}"
     if active_app.invite_user_id != user_id:
-        return (
-            f"application {active_app.id} invite_user_id="
-            f"{active_app.invite_user_id!r}"
-        )
+        return f"application {active_app.id} invite_user_id={active_app.invite_user_id!r}"
     return None
 
 
@@ -144,7 +139,7 @@ async def _handle_join(
 ) -> None:
     now = datetime.now(timezone.utc)
 
-    # Upsert user before admission decisions so the reject path can track kicks.
+    # Upsert user and mark as member
     await UserRepo.upsert(
         session,
         telegram_id=tg_user.id,
@@ -152,44 +147,30 @@ async def _handle_join(
         first_name=tg_user.first_name,
         last_name=tg_user.last_name,
     )
-
-    is_admin = tg_user.id in settings.ADMIN_IDS
-    active_app = None
-
-    if is_admin:
-        logger.info("Admin user %s joined without gatekeeper admission", tg_user.id)
-    else:
-        # Check for active vouched application with a user-bound invite.
-        active_app = await ApplicationRepo.get_active(session, tg_user.id)
-        rejection_reason = _admission_rejection_reason(active_app, tg_user.id)
-
-        if rejection_reason is not None:
-            await _reject_join(event, session, tg_user, now, rejection_reason)
-            return
-
-    await UserRepo.set_member(
-        session, tg_user.id, is_member=True, joined_at=now
-    )
+    await UserRepo.set_member(session, tg_user.id, is_member=True, joined_at=now)
 
     # Check if user already has an intro (don't overwrite)
     existing_intro = await IntroRepo.get(session, tg_user.id)
     if existing_intro is not None:
-        logger.info(
-            "User %s already has intro, skipping intro creation on join", tg_user.id
-        )
+        logger.info("User %s already has intro, skipping intro creation on join", tg_user.id)
         return
 
-    if is_admin:
+    if tg_user.id in settings.ADMIN_IDS:
+        logger.info("Admin user %s joined without gatekeeper admission", tg_user.id)
         return
 
-    await ApplicationRepo.update_status(
-        session, active_app.id, "added", added_at=now
-    )
+    # Check for active vouched application with a user-bound invite.
+    active_app = await ApplicationRepo.get_active(session, tg_user.id)
+    rejection_reason = _admission_rejection_reason(active_app, tg_user.id)
+
+    if rejection_reason is not None:
+        await _reject_join(event, session, tg_user, now, rejection_reason)
+        return
+
+    await ApplicationRepo.update_status(session, active_app.id, "added", added_at=now)
 
     # Build and save intro
-    answers = await QuestionnaireRepo.get_answers(
-        session, tg_user.id, application_id=active_app.id
-    )
+    answers = await QuestionnaireRepo.get_answers(session, tg_user.id, application_id=active_app.id)
     if answers:
         intro_text = build_intro_preview(answers)
 
@@ -198,9 +179,7 @@ async def _handle_join(
         if active_app.vouched_by:
             voucher = await UserRepo.get(session, active_app.vouched_by)
             if voucher:
-                vouched_by_name = (
-                    f"@{voucher.username}" if voucher.username else voucher.first_name
-                )
+                vouched_by_name = f"@{voucher.username}" if voucher.username else voucher.first_name
         vouched_by_display = html_escape(vouched_by_name)
 
         await IntroRepo.upsert(
@@ -222,9 +201,7 @@ async def _handle_join(
                 text=header + intro_text,
             )
         except Exception:
-            logger.exception(
-                "Failed to post intro for user %s", tg_user.id
-            )
+            logger.exception("Failed to post intro for user %s", tg_user.id)
 
 
 @router.message(F.new_chat_members)
@@ -255,6 +232,4 @@ async def _handle_leave(
 ) -> None:
     now = datetime.now(timezone.utc)
 
-    await UserRepo.set_member(
-        session, tg_user.id, is_member=False, left_at=now
-    )
+    await UserRepo.set_member(session, tg_user.id, is_member=False, left_at=now)

@@ -39,7 +39,11 @@ async def _make_chat_message(db_session, *, text: str = "hello") -> int:
     when = datetime.now(timezone.utc)
 
     await UserRepo.upsert(
-        db_session, telegram_id=user_id, username="u", first_name="U", last_name=None,
+        db_session,
+        telegram_id=user_id,
+        username="u",
+        first_name="U",
+        last_name=None,
     )
 
     msg = ChatMessage(
@@ -55,6 +59,7 @@ async def _make_chat_message(db_session, *, text: str = "hello") -> int:
 
 
 # ─── insert_version: new ───────────────────────────────────────────────────────────────────
+
 
 async def test_insert_first_version_creates_v1(db_session) -> None:
     from bot.db.repos.message_version import MessageVersionRepo
@@ -84,10 +89,16 @@ async def test_insert_second_version_with_different_hash_increments_seq(db_sessi
     msg_id = await _make_chat_message(db_session)
 
     v1 = await MessageVersionRepo.insert_version(
-        db_session, chat_message_id=msg_id, content_hash="hash-1", text="first",
+        db_session,
+        chat_message_id=msg_id,
+        content_hash="hash-1",
+        text="first",
     )
     v2 = await MessageVersionRepo.insert_version(
-        db_session, chat_message_id=msg_id, content_hash="hash-2", text="second",
+        db_session,
+        chat_message_id=msg_id,
+        content_hash="hash-2",
+        text="second",
     )
 
     assert v1.version_seq == 1
@@ -97,6 +108,7 @@ async def test_insert_second_version_with_different_hash_increments_seq(db_sessi
 
 # ─── insert_version: idempotent on duplicate hash ─────────────────────────────────────────
 
+
 async def test_insert_duplicate_hash_returns_existing_no_new_version(db_session) -> None:
     from bot.db.models import MessageVersion
     from bot.db.repos.message_version import MessageVersionRepo
@@ -104,10 +116,16 @@ async def test_insert_duplicate_hash_returns_existing_no_new_version(db_session)
     msg_id = await _make_chat_message(db_session)
 
     first = await MessageVersionRepo.insert_version(
-        db_session, chat_message_id=msg_id, content_hash="same-hash", text="x",
+        db_session,
+        chat_message_id=msg_id,
+        content_hash="same-hash",
+        text="x",
     )
     second = await MessageVersionRepo.insert_version(
-        db_session, chat_message_id=msg_id, content_hash="same-hash", text="x (would be dup)",
+        db_session,
+        chat_message_id=msg_id,
+        content_hash="same-hash",
+        text="x (would be dup)",
     )
 
     assert second.id == first.id
@@ -118,6 +136,7 @@ async def test_insert_duplicate_hash_returns_existing_no_new_version(db_session)
 
 
 # ─── get_max_version_seq ───────────────────────────────────────────────────────────────────
+
 
 async def test_get_max_version_seq_zero_for_no_versions(db_session) -> None:
     from bot.db.repos.message_version import MessageVersionRepo
@@ -131,26 +150,30 @@ async def test_get_max_version_seq_after_inserts(db_session) -> None:
 
     msg_id = await _make_chat_message(db_session)
     await MessageVersionRepo.insert_version(
-        db_session, chat_message_id=msg_id, content_hash="h1",
+        db_session,
+        chat_message_id=msg_id,
+        content_hash="h1",
     )
     await MessageVersionRepo.insert_version(
-        db_session, chat_message_id=msg_id, content_hash="h2",
+        db_session,
+        chat_message_id=msg_id,
+        content_hash="h2",
     )
     assert await MessageVersionRepo.get_max_version_seq(db_session, msg_id) == 2
 
 
 # ─── get_by_hash ───────────────────────────────────────────────────────────────────────────
 
+
 async def test_get_by_hash_returns_none_for_missing(db_session) -> None:
     from bot.db.repos.message_version import MessageVersionRepo
 
     msg_id = await _make_chat_message(db_session)
-    assert (
-        await MessageVersionRepo.get_by_hash(db_session, msg_id, "nope")
-    ) is None
+    assert (await MessageVersionRepo.get_by_hash(db_session, msg_id, "nope")) is None
 
 
 # ─── current_version_id FK closure (T1-05 forward-ref → real FK) ──────────────────────────
+
 
 async def test_chat_messages_current_version_id_fk_links_to_message_versions(db_session) -> None:
     from bot.db.models import ChatMessage
@@ -158,7 +181,10 @@ async def test_chat_messages_current_version_id_fk_links_to_message_versions(db_
 
     msg_id = await _make_chat_message(db_session, text="hi")
     v1 = await MessageVersionRepo.insert_version(
-        db_session, chat_message_id=msg_id, content_hash="h", text="hi",
+        db_session,
+        chat_message_id=msg_id,
+        content_hash="h",
+        text="hi",
     )
 
     msg = (
@@ -175,6 +201,7 @@ async def test_chat_messages_current_version_id_fk_links_to_message_versions(db_
 
 # ─── unique (chat_message_id, version_seq) ───────────────────────────────────────────────
 
+
 async def test_duplicate_version_seq_rejected_by_unique_constraint(db_session) -> None:
     """Direct ORM insert bypassing the repo: two rows with the same
     (chat_message_id, version_seq) must violate the unique constraint."""
@@ -186,14 +213,18 @@ async def test_duplicate_version_seq_rejected_by_unique_constraint(db_session) -
 
     db_session.add(
         MessageVersion(
-            chat_message_id=msg_id, version_seq=1, content_hash="a",
+            chat_message_id=msg_id,
+            version_seq=1,
+            content_hash="a",
         )
     )
     await db_session.flush()
 
     db_session.add(
         MessageVersion(
-            chat_message_id=msg_id, version_seq=1, content_hash="b",  # same seq, diff hash
+            chat_message_id=msg_id,
+            version_seq=1,
+            content_hash="b",  # same seq, diff hash
         )
     )
     with pytest.raises(IntegrityError):
@@ -202,6 +233,7 @@ async def test_duplicate_version_seq_rejected_by_unique_constraint(db_session) -
 
 # ─── cascade behaviour ─────────────────────────────────────────────────────────────────────
 
+
 async def test_versions_deleted_when_chat_message_deleted(db_session) -> None:
     """ON DELETE CASCADE from chat_messages.id wipes child versions."""
     from bot.db.models import ChatMessage, MessageVersion
@@ -209,12 +241,12 @@ async def test_versions_deleted_when_chat_message_deleted(db_session) -> None:
 
     msg_id = await _make_chat_message(db_session)
     await MessageVersionRepo.insert_version(
-        db_session, chat_message_id=msg_id, content_hash="h",
+        db_session,
+        chat_message_id=msg_id,
+        content_hash="h",
     )
 
-    await db_session.execute(
-        ChatMessage.__table__.delete().where(ChatMessage.id == msg_id)
-    )
+    await db_session.execute(ChatMessage.__table__.delete().where(ChatMessage.id == msg_id))
     await db_session.flush()
 
     rows = await db_session.execute(
@@ -224,6 +256,7 @@ async def test_versions_deleted_when_chat_message_deleted(db_session) -> None:
 
 
 # ─── metadata smoke ────────────────────────────────────────────────────────────────────────
+
 
 def test_message_version_metadata_smoke(app_env) -> None:
     from tests.conftest import import_module

@@ -54,6 +54,7 @@ def _make_message_update(
 
 # ─── flag gating ────────────────────────────────────────────────────────────────────────
 
+
 async def test_record_update_returns_none_when_flag_off(db_session) -> None:
     from bot.db.models import TelegramUpdate
     from bot.services.ingestion import record_update
@@ -103,6 +104,7 @@ async def test_record_update_idempotent_on_duplicate_update_id(db_session) -> No
 
 # ─── deterministic raw_hash ────────────────────────────────────────────────────────────
 
+
 def test_compute_raw_hash_is_deterministic(app_env) -> None:
     from bot.services.ingestion import _compute_raw_hash
 
@@ -113,6 +115,7 @@ def test_compute_raw_hash_is_deterministic(app_env) -> None:
 
 
 # ─── get_or_create_live_run ─────────────────────────────────────────────────────────────
+
 
 async def test_get_or_create_live_run_creates_when_missing(db_session) -> None:
     from bot.services.ingestion import get_or_create_live_run
@@ -131,6 +134,7 @@ async def test_get_or_create_live_run_attaches_when_exists(db_session) -> None:
 
 
 # ─── stub detector wired ────────────────────────────────────────────────────────────────
+
 
 async def test_record_update_calls_detect_policy_stub(db_session, monkeypatch) -> None:
     """Verify the stub detector is actually invoked. When T1-12 swaps the stub for the
@@ -189,12 +193,12 @@ async def test_record_update_calls_detect_policy_BEFORE_insert(db_session, monke
     await ingestion.record_update(db_session, update)
 
     assert call_order == ["detect_policy", "insert"], (
-        f"#offrecord ordering rule violated: expected detect_policy before insert, "
-        f"got {call_order}"
+        f"#offrecord ordering rule violated: expected detect_policy before insert, got {call_order}"
     )
 
 
 # ─── classifier helpers ─────────────────────────────────────────────────────────────────
+
 
 def test_classify_update_type_message(app_env) -> None:
     from bot.services.ingestion import _classify_update_type

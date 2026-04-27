@@ -45,7 +45,11 @@ async def _make_legacy_chat_message(
     when = datetime.now(timezone.utc)
 
     await UserRepo.upsert(
-        db_session, telegram_id=user_id, username="u", first_name="U", last_name=None,
+        db_session,
+        telegram_id=user_id,
+        username="u",
+        first_name="U",
+        last_name=None,
     )
 
     msg = ChatMessage(
@@ -63,32 +67,26 @@ async def _make_legacy_chat_message(
 
 # ─── happy path ────────────────────────────────────────────────────────────────────────────
 
+
 async def test_backfill_creates_v1_for_each_legacy_row(db_session) -> None:
     from bot.db.models import ChatMessage, MessageVersion
     from bot.services.backfill import backfill_v1_message_versions
 
-    msg_ids = [
-        await _make_legacy_chat_message(db_session, text=f"row {i}")
-        for i in range(5)
-    ]
+    msg_ids = [await _make_legacy_chat_message(db_session, text=f"row {i}") for i in range(5)]
 
     count = await backfill_v1_message_versions(db_session, batch_size=10)
     assert count == 5
 
     for msg_id in msg_ids:
         msg = (
-            await db_session.execute(
-                select(ChatMessage).where(ChatMessage.id == msg_id)
-            )
+            await db_session.execute(select(ChatMessage).where(ChatMessage.id == msg_id))
         ).scalar_one()
         await db_session.refresh(msg)
         assert msg.current_version_id is not None
 
         v = (
             await db_session.execute(
-                select(MessageVersion).where(
-                    MessageVersion.chat_message_id == msg_id
-                )
+                select(MessageVersion).where(MessageVersion.chat_message_id == msg_id)
             )
         ).scalar_one()
         assert v.version_seq == 1
@@ -99,6 +97,7 @@ async def test_backfill_creates_v1_for_each_legacy_row(db_session) -> None:
 
 
 # ─── idempotency ───────────────────────────────────────────────────────────────────────────
+
 
 async def test_backfill_is_idempotent_on_rerun(db_session) -> None:
     from bot.services.backfill import backfill_v1_message_versions
@@ -115,6 +114,7 @@ async def test_backfill_is_idempotent_on_rerun(db_session) -> None:
 
 # ─── chunked / batched processing ─────────────────────────────────────────────────────────
 
+
 async def test_backfill_chunks_correctly_when_more_rows_than_batch_size(db_session) -> None:
     from bot.services.backfill import backfill_v1_message_versions
 
@@ -126,6 +126,7 @@ async def test_backfill_chunks_correctly_when_more_rows_than_batch_size(db_sessi
 
 
 # ─── NULL text handled ─────────────────────────────────────────────────────────────────────
+
 
 async def test_backfill_handles_null_text_rows(db_session) -> None:
     """Legacy rows where text is NULL (e.g. media messages) must still get a v1
@@ -149,6 +150,7 @@ async def test_backfill_handles_null_text_rows(db_session) -> None:
 
 # ─── pre-existing v1 rows are not duplicated ───────────────────────────────────────────────
 
+
 async def test_backfill_skips_messages_with_existing_current_version_id(db_session) -> None:
     """If a message already has current_version_id set (e.g. from live ingestion),
     the backfill must not touch it."""
@@ -164,9 +166,7 @@ async def test_backfill_skips_messages_with_existing_current_version_id(db_sessi
         text="already wired",
     )
     msg = (
-        await db_session.execute(
-            select(ChatMessage).where(ChatMessage.id == pre_msg_id)
-        )
+        await db_session.execute(select(ChatMessage).where(ChatMessage.id == pre_msg_id))
     ).scalar_one()
     msg.current_version_id = v.id
     await db_session.flush()
@@ -177,15 +177,14 @@ async def test_backfill_skips_messages_with_existing_current_version_id(db_sessi
     assert count == 1  # only the not-yet-wired message
 
     other_msg = (
-        await db_session.execute(
-            select(ChatMessage).where(ChatMessage.id == other_id)
-        )
+        await db_session.execute(select(ChatMessage).where(ChatMessage.id == other_id))
     ).scalar_one()
     await db_session.refresh(other_msg)
     assert other_msg.current_version_id is not None
 
 
 # ─── content_hash deterministic ────────────────────────────────────────────────────────────
+
 
 def test_compute_content_hash_deterministic(app_env) -> None:
     from bot.services.content_hash import compute_content_hash

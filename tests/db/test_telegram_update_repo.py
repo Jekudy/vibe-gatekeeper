@@ -20,6 +20,7 @@ def _random_chat_id() -> int:
 
 # ─── insert: live updates (with update_id) ─────────────────────────────────────────────────
 
+
 async def test_insert_live_update_persists_row(db_session) -> None:
     from bot.db.repos.telegram_update import TelegramUpdateRepo
 
@@ -76,6 +77,7 @@ async def test_insert_duplicate_update_id_returns_existing_no_duplicate(db_sessi
 
 # ─── insert: synthetic import updates (no update_id) ───────────────────────────────────────
 
+
 async def test_insert_without_update_id_creates_independent_rows(db_session) -> None:
     """Synthetic import updates (NULL update_id) bypass the partial unique index. Two
     inserts produce two rows; the importer is responsible for its own dedup via raw_hash
@@ -105,6 +107,7 @@ async def test_insert_without_update_id_creates_independent_rows(db_session) -> 
 
 # ─── ingestion_run_id FK behaviour ─────────────────────────────────────────────────────────
 
+
 async def test_insert_with_ingestion_run_id(db_session) -> None:
     from bot.db.repos.ingestion_run import IngestionRunRepo
     from bot.db.repos.telegram_update import TelegramUpdateRepo
@@ -121,6 +124,7 @@ async def test_insert_with_ingestion_run_id(db_session) -> None:
 
 
 # ─── redaction columns ────────────────────────────────────────────────────────────────────
+
 
 async def test_insert_with_redaction_marker(db_session) -> None:
     """Smoke that the redaction columns persist as set. Real T1-12 detector logic lives
@@ -144,6 +148,7 @@ async def test_insert_with_redaction_marker(db_session) -> None:
 
 # ─── get_by_update_id ─────────────────────────────────────────────────────────────────────
 
+
 async def test_get_by_update_id_returns_none_for_missing(db_session) -> None:
     from bot.db.repos.telegram_update import TelegramUpdateRepo
 
@@ -151,6 +156,7 @@ async def test_get_by_update_id_returns_none_for_missing(db_session) -> None:
 
 
 # ─── metadata smoke ───────────────────────────────────────────────────────────────────────
+
 
 def test_telegram_update_model_registered(app_env) -> None:
     """Offline smoke: model + columns + indexes registered (incl. partial unique)."""
@@ -181,7 +187,5 @@ def test_telegram_update_model_registered(app_env) -> None:
     assert "ix_telegram_updates_chat_id_message_id" in index_names
 
     # Partial unique on update_id
-    update_id_index = next(
-        ix for ix in table.indexes if ix.name == "ix_telegram_updates_update_id"
-    )
+    update_id_index = next(ix for ix in table.indexes if ix.name == "ix_telegram_updates_update_id")
     assert update_id_index.unique is True

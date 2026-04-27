@@ -48,6 +48,7 @@ async def _ensure_user(session, telegram_id: int) -> None:
 
 # ─── existing-row survival ────────────────────────────────────────────────────────────────
 
+
 async def test_legacy_row_shape_persists_with_defaults(db_session) -> None:
     """Inserting a row with ONLY the original 8 columns (the shape gatekeeper bot wrote
     for years before T1-05) must succeed — server defaults populate memory_policy and
@@ -73,9 +74,7 @@ async def test_legacy_row_shape_persists_with_defaults(db_session) -> None:
     await db_session.flush()
 
     fetched = (
-        await db_session.execute(
-            select(ChatMessage).where(ChatMessage.id == legacy.id)
-        )
+        await db_session.execute(select(ChatMessage).where(ChatMessage.id == legacy.id))
     ).scalar_one()
     await db_session.refresh(fetched)
 
@@ -95,6 +94,7 @@ async def test_legacy_row_shape_persists_with_defaults(db_session) -> None:
 
 
 # ─── new fields persist ────────────────────────────────────────────────────────────────────
+
 
 async def test_new_fields_persist(db_session) -> None:
     from bot.db.models import ChatMessage
@@ -140,6 +140,7 @@ async def test_new_fields_persist(db_session) -> None:
 
 
 # ─── check constraints ─────────────────────────────────────────────────────────────────────
+
 
 async def test_invalid_memory_policy_rejected(db_session) -> None:
     """memory_policy must be one of normal/nomem/offrecord/forgotten."""
@@ -190,6 +191,7 @@ async def test_invalid_visibility_rejected(db_session) -> None:
 
 # ─── valid policy values ───────────────────────────────────────────────────────────────────
 
+
 async def test_all_valid_memory_policy_values_accepted(db_session) -> None:
     from bot.db.models import ChatMessage
 
@@ -212,6 +214,7 @@ async def test_all_valid_memory_policy_values_accepted(db_session) -> None:
 
 
 # ─── messageRepo.save still works (regression) ─────────────────────────────────────────────
+
 
 async def test_message_repo_save_still_works_with_extended_columns(db_session) -> None:
     """T0-03 idempotent save must keep working after the column extension."""
@@ -257,6 +260,7 @@ async def test_message_repo_save_still_works_with_extended_columns(db_session) -
 
 
 # ─── metadata smoke ────────────────────────────────────────────────────────────────────────
+
 
 def test_chat_messages_metadata_includes_new_columns_and_indexes(app_env) -> None:
     from tests.conftest import import_module

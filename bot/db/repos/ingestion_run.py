@@ -37,9 +37,7 @@ def _reject_secret_shaped_keys(name: str, payload: dict | None) -> None:
         return
     leaked = [k for k in payload.keys() if _SECRET_KEY_PATTERN.search(str(k))]
     if leaked:
-        raise ValueError(
-            f"{name} must not contain secret-shaped keys; refused: {sorted(leaked)}"
-        )
+        raise ValueError(f"{name} must not contain secret-shaped keys; refused: {sorted(leaked)}")
 
 
 class IngestionRunRepo:
@@ -87,9 +85,7 @@ class IngestionRunRepo:
         moves preserve the original ``finished_at`` so a 'completed' run that is later
         overwritten as 'failed' still records when it actually stopped."""
         if status not in _ALLOWED_STATUSES:
-            raise ValueError(
-                f"unsupported status {status!r}; allowed: {sorted(_ALLOWED_STATUSES)}"
-            )
+            raise ValueError(f"unsupported status {status!r}; allowed: {sorted(_ALLOWED_STATUSES)}")
         _reject_secret_shaped_keys("stats_json", stats_json)
         _reject_secret_shaped_keys("error_json", error_json)
 

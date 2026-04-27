@@ -20,9 +20,7 @@ INVITE_OUTBOX_BATCH_SIZE = 10
 
 async def process_invite_outbox(bot: Bot) -> None:
     async with async_session() as session:
-        rows = await InviteOutboxRepo.get_pending(
-            session, limit=INVITE_OUTBOX_BATCH_SIZE
-        )
+        rows = await InviteOutboxRepo.get_pending(session, limit=INVITE_OUTBOX_BATCH_SIZE)
         for row in rows:
             try:
                 link = await invite_service.create_invite(

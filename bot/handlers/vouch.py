@@ -137,9 +137,7 @@ async def handle_ready(
         await callback.answer("Эта кнопка не для тебя.", show_alert=True)
         return
 
-    await ApplicationRepo.update_status(
-        session, app_id, "vouched", invite_user_id=app.user_id
-    )
+    await ApplicationRepo.update_status(session, app_id, "vouched", invite_user_id=app.user_id)
     await InviteOutboxRepo.create_pending(
         session,
         application_id=app_id,
@@ -148,7 +146,5 @@ async def handle_ready(
     )
 
     if callback.message is not None:
-        await callback.message.edit_text(
-            "Запрос принят. Инвайт скоро придёт в личные сообщения."
-        )
+        await callback.message.edit_text("Запрос принят. Инвайт скоро придёт в личные сообщения.")
     await callback.answer()

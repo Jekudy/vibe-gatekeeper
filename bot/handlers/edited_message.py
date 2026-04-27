@@ -174,9 +174,7 @@ async def _update_memory_policy(
     Does NOT restore content for offrecord→normal flips per irreversibility doctrine.
     """
     await session.execute(
-        update(ChatMessage)
-        .where(ChatMessage.id == row.id)
-        .values(memory_policy=new_policy)
+        update(ChatMessage).where(ChatMessage.id == row.id).values(memory_policy=new_policy)
     )
     await session.flush()
 
@@ -243,18 +241,14 @@ async def handle_edited_message(
     if new_policy == "offrecord" and old_policy != "offrecord":
         # normal/nomem → offrecord: retroactively zero out content (BLOCKER #1).
         thread_id = getattr(message, "message_thread_id", None)
-        await _apply_offrecord_flip(
-            session, existing, mark_payload, user_id, thread_id
-        )
+        await _apply_offrecord_flip(session, existing, mark_payload, user_id, thread_id)
         # After flip, content is nulled — version text/caption must also be null.
         # Recompute hash with null content to reflect actual stored state.
         # Use the new_hash as-is; the version row will have is_redacted=True.
     elif new_policy != old_policy:
         # Any other policy transition (offrecord→normal, normal→nomem, nomem→normal).
         thread_id = getattr(message, "message_thread_id", None)
-        await _update_memory_policy(
-            session, existing, new_policy, mark_payload, user_id, thread_id
-        )
+        await _update_memory_policy(session, existing, new_policy, mark_payload, user_id, thread_id)
 
     # Step 6: check if content actually changed by looking up the new hash.
     # HIGH #3 legacy hash: MessageVersionRepo.insert_version already handles idempotency
@@ -288,9 +282,7 @@ async def handle_edited_message(
     # If found → same content hash already stored → no new version.
     # If not found → check if the content is really different by comparing against
     # the chv1 recomputed from existing row (covers legacy hash case).
-    existing_version = await MessageVersionRepo.get_by_hash(
-        session, existing.id, new_hash
-    )
+    existing_version = await MessageVersionRepo.get_by_hash(session, existing.id, new_hash)
     if existing_version is not None:
         # Hash already in DB — no-op (unchanged content or duplicate edit).
         return
@@ -323,15 +315,17 @@ async def handle_edited_message(
     )
 
     # Step 7: update chat_messages to point at the new version and reflect edited content.
+    # IRREVERSIBILITY DOCTRINE (HANDOFF.md §10): if the parent row was previously offrecord
+    # (i.e., text/caption/raw_json were already nulled), leave them NULL even when the edit
+    # flips policy back to normal. The original content window is destroyed permanently;
+    # the new edited content is recorded only inside message_versions, not surfaced back to
+    # chat_messages. This closes the cross-team-review BLOCKER on offrecord→normal flips.
     update_values: dict = {"current_version_id": new_version.id}
-    if new_policy != "offrecord":
-        # Only update text/caption in chat_messages if not offrecord
-        # (offrecord was already nulled in _apply_offrecord_flip).
+    parent_was_redacted = old_policy == "offrecord"
+    if new_policy != "offrecord" and not parent_was_redacted:
         update_values["text"] = text
         update_values["caption"] = caption
     await session.execute(
-        update(ChatMessage)
-        .where(ChatMessage.id == existing.id)
-        .values(**update_values)
+        update(ChatMessage).where(ChatMessage.id == existing.id).values(**update_values)
     )
     await session.flush()

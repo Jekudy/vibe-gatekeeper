@@ -47,9 +47,7 @@ async def _get_pending_ids(
             session.add(app)
             await session.commit()
 
-            result = await application_repo.ApplicationRepo.get_pending_older_than(
-                session, hours
-            )
+            result = await application_repo.ApplicationRepo.get_pending_older_than(session, hours)
             return [pending_app.id for pending_app in result]
     finally:
         await engine.dispose()

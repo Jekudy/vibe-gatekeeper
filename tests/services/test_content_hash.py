@@ -19,6 +19,7 @@ pytestmark = pytest.mark.usefixtures("app_env")
 
 # ─── determinism ──────────────────────────────────────────────────────────────────────────
 
+
 def test_same_content_same_hash(app_env) -> None:
     from bot.services.content_hash import compute_content_hash
 
@@ -60,6 +61,7 @@ def test_message_kind_none_defaults_to_text(app_env) -> None:
 
 
 # ─── entity normalization ─────────────────────────────────────────────────────────────────
+
 
 def test_entities_sorted_by_offset_then_length_then_type(app_env) -> None:
     """Entities given in different list-orders but identical content sets must hash the same."""
@@ -122,6 +124,7 @@ def test_entity_at_different_offset_different_hash(app_env) -> None:
 
 # ─── format version tag ───────────────────────────────────────────────────────────────────
 
+
 def test_format_version_tag_is_in_payload(app_env, monkeypatch) -> None:
     """If the format version constant changes, the same content produces a different
     hash. This pins the version-tag-in-payload contract: future format changes are
@@ -143,6 +146,7 @@ def test_current_format_version_is_chv1(app_env) -> None:
 
 # ─── output shape ─────────────────────────────────────────────────────────────────────────
 
+
 def test_output_is_64_char_hex(app_env) -> None:
     from bot.services.content_hash import compute_content_hash
 
@@ -163,6 +167,7 @@ def test_unicode_text_handled(app_env) -> None:
 
 # ─── golden-value: pin the chv1 recipe so accidental drift is caught ─────────────────────
 
+
 def test_chv1_golden_value_simple(app_env) -> None:
     """Canonical chv1 hash for a known input, pinned. If this assertion fails, the
     hash recipe changed in a way that is NOT a pure refactor — the format version
@@ -171,12 +176,8 @@ def test_chv1_golden_value_simple(app_env) -> None:
 
     # Computed once for chv1 from compute_content_hash("hello", None, None, None).
     # Pinned here so any silent recipe drift trips this test.
-    expected = (
-        "ae70abb0e93e71d2c1c1367f83c8391609fa529c7d0f48f2717b6f73fe4992bb"
-    )
-    actual = compute_content_hash(
-        text="hello", caption=None, message_kind=None, entities=None
-    )
+    expected = "ae70abb0e93e71d2c1c1367f83c8391609fa529c7d0f48f2717b6f73fe4992bb"
+    actual = compute_content_hash(text="hello", caption=None, message_kind=None, entities=None)
     # The pinned value must match. If T1-08's recipe drifts, regenerate this fixture
     # AND bump HASH_FORMAT_VERSION in bot/services/content_hash.py.
     assert actual == expected, (
@@ -186,6 +187,7 @@ def test_chv1_golden_value_simple(app_env) -> None:
 
 
 # ─── signature: only canonical inputs accepted ────────────────────────────────────────────
+
 
 def test_no_kwargs_for_volatile_fields(app_env) -> None:
     """The function deliberately does NOT accept date / message_id / from_user etc.

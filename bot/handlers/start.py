@@ -77,9 +77,7 @@ async def cmd_start(
                 next_idx = last_idx + 1
                 await state.update_data(application_id=active_app.id)
                 await state.set_state(STATES_LIST[next_idx])
-                await message.answer(
-                    RESUME_QUESTIONNAIRE.format(question=QUESTIONS[next_idx])
-                )
+                await message.answer(RESUME_QUESTIONNAIRE.format(question=QUESTIONS[next_idx]))
             elif last_idx is not None and last_idx == len(QUESTIONS) - 1:
                 # All questions answered, go to confirm
                 await state.update_data(application_id=active_app.id)
@@ -88,9 +86,7 @@ async def cmd_start(
                 # No answers yet, start from beginning
                 await state.update_data(application_id=active_app.id)
                 await state.set_state(QuestionnaireForm.q1_name)
-                await message.answer(
-                    RESUME_QUESTIONNAIRE.format(question=QUESTIONS[0])
-                )
+                await message.answer(RESUME_QUESTIONNAIRE.format(question=QUESTIONS[0]))
             return
 
         if active_app.status == "vouched":
@@ -104,9 +100,7 @@ async def cmd_start(
         app = await ApplicationRepo.create(session, tg_user.id)
         await state.update_data(application_id=app.id, is_existing_member=True)
         await state.set_state(QuestionnaireForm.q1_name)
-        await message.answer(
-            WELCOME_EXISTING_MEMBER.format(question=QUESTIONS[0])
-        )
+        await message.answer(WELCOME_EXISTING_MEMBER.format(question=QUESTIONS[0]))
         return
 
     if user.is_member and intro is not None:
@@ -173,9 +167,7 @@ async def _show_confirm(
 ) -> None:
     from bot.handlers.questionnaire import build_intro_preview
 
-    answers = await QuestionnaireRepo.get_answers(
-        session, user_id, application_id=application_id
-    )
+    answers = await QuestionnaireRepo.get_answers(session, user_id, application_id=application_id)
     intro_text = build_intro_preview(answers)
     from bot.texts import CONFIRM_PROMPT
     from bot.keyboards.inline import confirm_keyboard

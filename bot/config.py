@@ -59,9 +59,7 @@ class Settings(BaseSettings):
                 self.WEB_SESSION_SECRET = secrets.token_urlsafe(32)
                 return self
 
-            raise ValueError(
-                "WEB_SESSION_SECRET must be at least 32 characters in production"
-            )
+            raise ValueError("WEB_SESSION_SECRET must be at least 32 characters in production")
 
         if len(self.WEB_SESSION_SECRET) >= _MIN_WEB_SESSION_SECRET_LENGTH:
             return self

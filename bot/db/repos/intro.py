@@ -16,9 +16,7 @@ class IntroRepo:
         intro_text: str,
         vouched_by_name: str,
     ) -> Intro:
-        result = await session.execute(
-            select(Intro).where(Intro.user_id == user_id)
-        )
+        result = await session.execute(select(Intro).where(Intro.user_id == user_id))
         intro = result.scalar_one_or_none()
         if intro is None:
             intro = Intro(
@@ -35,9 +33,7 @@ class IntroRepo:
 
     @staticmethod
     async def get(session: AsyncSession, user_id: int) -> Intro | None:
-        result = await session.execute(
-            select(Intro).where(Intro.user_id == user_id)
-        )
+        result = await session.execute(select(Intro).where(Intro.user_id == user_id))
         return result.scalar_one_or_none()
 
     @staticmethod
@@ -47,9 +43,7 @@ class IntroRepo:
 
     @staticmethod
     async def delete(session: AsyncSession, user_id: int) -> None:
-        await session.execute(
-            delete(Intro).where(Intro.user_id == user_id)
-        )
+        await session.execute(delete(Intro).where(Intro.user_id == user_id))
         await session.flush()
 
     @staticmethod
@@ -66,11 +60,7 @@ class IntroRepo:
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_stale_intros(
-        session: AsyncSession, days: int
-    ) -> list[Intro]:
+    async def get_stale_intros(session: AsyncSession, days: int) -> list[Intro]:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        result = await session.execute(
-            select(Intro).where(Intro.updated_at < cutoff)
-        )
+        result = await session.execute(select(Intro).where(Intro.updated_at < cutoff))
         return list(result.scalars().all())

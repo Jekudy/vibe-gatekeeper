@@ -43,7 +43,9 @@ class User(Base):
         DateTime(timezone=True), default=func.now(), server_default=func.now(), onupdate=func.now()
     )
 
-    intro: Mapped[Intro | None] = relationship("Intro", back_populates="user", foreign_keys="[Intro.user_id]")
+    intro: Mapped[Intro | None] = relationship(
+        "Intro", back_populates="user", foreign_keys="[Intro.user_id]"
+    )
 
 
 class Application(Base):
@@ -52,14 +54,18 @@ class Application(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
-    status: Mapped[str] = mapped_column(String(20))  # filling, pending, vouched, added, rejected, privacy_block
+    status: Mapped[str] = mapped_column(
+        String(20)
+    )  # filling, pending, vouched, added, rejected, privacy_block
     invite_user_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="SET NULL")
     )
     questionnaire_message_id: Mapped[int | None] = mapped_column(BigInteger)
     vouched_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))
     vouched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    invite_user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
+    invite_user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
+    )
     notified_admin_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     nudged_newcomer_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -190,9 +196,7 @@ class ChatMessage(Base):
         Boolean, nullable=False, default=False, server_default="false"
     )
     content_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class MessageVersion(Base):
@@ -243,9 +247,7 @@ class MessageVersion(Base):
     caption: Mapped[str | None] = mapped_column(Text, nullable=True)
     normalized_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     entities_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    edit_date: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    edit_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     captured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -296,12 +298,8 @@ class OffrecordMark(Base):
             "status IN ('active','expired','revoked')",
             name="ck_offrecord_marks_status",
         ),
-        Index(
-            "ix_offrecord_marks_mark_type_status", "mark_type", "status"
-        ),
-        Index(
-            "ix_offrecord_marks_chat_message_id", "chat_message_id"
-        ),
+        Index("ix_offrecord_marks_mark_type_status", "mark_type", "status"),
+        Index("ix_offrecord_marks_chat_message_id", "chat_message_id"),
         Index("ix_offrecord_marks_scope", "scope_type", "scope_id"),
     )
 
@@ -334,9 +332,7 @@ class OffrecordMark(Base):
         server_default=func.now(),
         nullable=False,
     )
-    expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="active", server_default="active"
     )
@@ -482,9 +478,7 @@ class IngestionRun(Base):
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=func.now(), server_default=func.now(), nullable=False
     )
-    finished_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,

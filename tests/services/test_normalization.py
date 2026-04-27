@@ -42,6 +42,7 @@ def _msg(**attrs):
 
 # ─── T1-09 reply_to_message_id ─────────────────────────────────────────────────────────────
 
+
 def test_extract_reply_to_message_id_present(app_env) -> None:
     from bot.services.normalization import extract_reply_to_message_id
 
@@ -67,6 +68,7 @@ def test_extract_reply_to_message_id_unresolved_target(app_env) -> None:
 
 # ─── T1-10 message_thread_id ───────────────────────────────────────────────────────────────
 
+
 def test_extract_message_thread_id_present(app_env) -> None:
     from bot.services.normalization import extract_message_thread_id
 
@@ -83,6 +85,7 @@ def test_extract_message_thread_id_absent(app_env) -> None:
 
 # ─── T1-11 caption ─────────────────────────────────────────────────────────────────────────
 
+
 def test_extract_caption_present(app_env) -> None:
     from bot.services.normalization import extract_caption
 
@@ -98,6 +101,7 @@ def test_extract_caption_absent(app_env) -> None:
 
 
 # ─── T1-11 message_kind ────────────────────────────────────────────────────────────────────
+
 
 def test_classify_text_message(app_env) -> None:
     from bot.services.normalization import classify_message_kind
@@ -172,6 +176,7 @@ def test_classify_unknown_falls_back(app_env) -> None:
 
 
 # ─── extract_normalized_fields composition ────────────────────────────────────────────────
+
 
 def test_extract_all_fields_text_message(app_env) -> None:
     from bot.services.normalization import extract_normalized_fields

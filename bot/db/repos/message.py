@@ -99,9 +99,7 @@ class MessageRepo:
         return existing.scalar_one()
 
     @staticmethod
-    async def find_by_exact_text(
-        session: AsyncSession, text: str
-    ) -> ChatMessage | None:
+    async def find_by_exact_text(session: AsyncSession, text: str) -> ChatMessage | None:
         result = await session.execute(
             select(ChatMessage)
             .where(ChatMessage.text == text)

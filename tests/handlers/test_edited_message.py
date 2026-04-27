@@ -160,7 +160,9 @@ def test_edit_changes_text_creates_v2(app_env, monkeypatch) -> None:
     mock_refresh = AsyncMock()
 
     session = AsyncMock()
-    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing_row)))
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing_row))
+    )
     session.flush = AsyncMock()
     session.refresh = mock_refresh
 
@@ -216,7 +218,9 @@ def test_edit_unchanged_content_no_version(app_env, monkeypatch) -> None:
     mock_get_by_hash = AsyncMock(return_value=existing_version)
     mock_insert_version = AsyncMock()
     session = AsyncMock()
-    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing_row)))
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing_row))
+    )
     session.refresh = AsyncMock()
 
     monkeypatch.setattr(handler, "_find_chat_message", mock_find)
@@ -241,8 +245,7 @@ def test_edit_normal_to_offrecord_flip_zero_out(app_env, monkeypatch) -> None:
     user_id = _random_user_id()
     # Edited message now contains #offrecord
     message = _make_message(
-        message_id=msg_id, chat_id=chat_id, user_id=user_id,
-        text="this is #offrecord content"
+        message_id=msg_id, chat_id=chat_id, user_id=user_id, text="this is #offrecord content"
     )
 
     existing_row = _make_chat_message_row(
@@ -267,7 +270,9 @@ def test_edit_normal_to_offrecord_flip_zero_out(app_env, monkeypatch) -> None:
 
     session = AsyncMock()
     session.refresh = AsyncMock(side_effect=_refresh_side_effect)
-    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing_row)))
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing_row))
+    )
     session.flush = AsyncMock()
 
     monkeypatch.setattr(handler, "_find_chat_message", mock_find)
@@ -308,7 +313,7 @@ def test_edit_offrecord_to_normal_flip_no_restoration(app_env, monkeypatch) -> N
         id=10,
         message_id=msg_id,
         chat_id=chat_id,
-        text=None,      # content already lost
+        text=None,  # content already lost
         caption=None,
         memory_policy="offrecord",
         is_redacted=True,
@@ -321,7 +326,9 @@ def test_edit_offrecord_to_normal_flip_no_restoration(app_env, monkeypatch) -> N
 
     session = AsyncMock()
     session.refresh = AsyncMock()
-    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing_row)))
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing_row))
+    )
     session.flush = AsyncMock()
 
     monkeypatch.setattr(handler, "_find_chat_message", mock_find)
@@ -338,6 +345,84 @@ def test_edit_offrecord_to_normal_flip_no_restoration(app_env, monkeypatch) -> N
 
     # Content must NOT be restored — we do not call _apply_offrecord_flip
     # (no way to verify text wasn't set from this test, but the flow doesn't write it)
+
+
+def test_edit_offrecord_to_normal_does_not_write_text_caption_to_parent(
+    app_env, monkeypatch
+) -> None:
+    """Stronger irreversibility assertion (Codex cross-team review BLOCKER).
+
+    Captures the actual UPDATE statement issued against ChatMessage and asserts that
+    on offrecord→normal flip, the values dict does NOT contain ``text`` or ``caption``
+    keys — only ``current_version_id``. This catches the original Team A bug where
+    the broad ``new_policy != 'offrecord'`` branch leaked the edited text into the
+    parent row.
+    """
+    handler = import_module("bot.handlers.edited_message")
+
+    msg_id = _random_message_id()
+    chat_id = -1001234567890
+    message = _make_message(message_id=msg_id, chat_id=chat_id, text="trying to come back")
+
+    existing_row = _make_chat_message_row(
+        id=11,
+        message_id=msg_id,
+        chat_id=chat_id,
+        text=None,
+        caption=None,
+        memory_policy="offrecord",
+        is_redacted=True,
+    )
+
+    captured_updates: list[dict] = []
+
+    async def capture_execute(stmt, *args, **kwargs):
+        # update(ChatMessage).values(**update_values) — pull values out of the compiled
+        # statement. SQLAlchemy 2.0 exposes them via stmt.compile().params or
+        # stmt._values (private). We use the simpler `_values` attribute, which is a
+        # dict-like of Column→bound-value at the Update level.
+        try:
+            values = dict(getattr(stmt, "_values", {}) or {})
+            # Convert sqlalchemy Column keys to str names.
+            captured_updates.append(
+                {str(k.key) if hasattr(k, "key") else str(k): v for k, v in values.items()}
+            )
+        except Exception:  # pragma: no cover — defensive
+            captured_updates.append({})
+        result = MagicMock()
+        result.scalar_one_or_none = MagicMock(return_value=existing_row)
+        return result
+
+    mock_find = AsyncMock(return_value=existing_row)
+    mock_get_by_hash = AsyncMock(return_value=None)
+    mock_insert_version = AsyncMock(return_value=_make_version_row(id=2, version_seq=2))
+
+    session = AsyncMock()
+    session.refresh = AsyncMock()
+    session.execute = AsyncMock(side_effect=capture_execute)
+    session.flush = AsyncMock()
+
+    monkeypatch.setattr(handler, "_find_chat_message", mock_find)
+    monkeypatch.setattr(handler.MessageVersionRepo, "get_by_hash", mock_get_by_hash)
+    monkeypatch.setattr(handler.MessageVersionRepo, "insert_version", mock_insert_version)
+
+    asyncio.run(handler.handle_edited_message(message, session))
+
+    # Across all UPDATE statements issued in this handler invocation, none must touch
+    # the content columns of the parent row when prior policy was offrecord.
+    for upd_values in captured_updates:
+        assert "text" not in upd_values, (
+            f"PRIVACY VIOLATION: edited text leaked into parent row on "
+            f"offrecord→normal flip. Captured update: {upd_values}"
+        )
+        assert "caption" not in upd_values, (
+            f"PRIVACY VIOLATION: edited caption leaked into parent row on "
+            f"offrecord→normal flip. Captured update: {upd_values}"
+        )
+        assert "raw_json" not in upd_values, (
+            f"PRIVACY VIOLATION: raw_json leaked into parent row on "
+            f"offrecord→normal flip. Captured update: {upd_values}"
+        )
 
 
 # ─── Test 5: unknown prior message → warning + return, no crash ───────────────
@@ -407,7 +492,9 @@ def test_edit_caption_on_media_creates_v2(app_env, monkeypatch) -> None:
 
     session = AsyncMock()
     session.refresh = AsyncMock()
-    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing_row)))
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing_row))
+    )
     session.flush = AsyncMock()
 
     monkeypatch.setattr(handler, "_find_chat_message", mock_find)
@@ -455,7 +542,9 @@ def test_edit_empty_text_creates_v2(app_env, monkeypatch) -> None:
 
     session = AsyncMock()
     session.refresh = AsyncMock()
-    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing_row)))
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing_row))
+    )
     session.flush = AsyncMock()
 
     monkeypatch.setattr(handler, "_find_chat_message", mock_find)
@@ -487,17 +576,23 @@ def test_edit_entities_only_change_creates_v2(app_env, monkeypatch) -> None:
     old_entities = [{"offset": 0, "length": 5, "type": "bold"}]
     new_entities_obj = [
         SimpleNamespace(
-            offset=0, length=5, type="bold",
-            model_dump=lambda mode, exclude_none: {"offset": 0, "length": 5, "type": "bold"}
+            offset=0,
+            length=5,
+            type="bold",
+            model_dump=lambda mode, exclude_none: {"offset": 0, "length": 5, "type": "bold"},
         ),
         SimpleNamespace(
-            offset=6, length=3, type="italic",
-            model_dump=lambda mode, exclude_none: {"offset": 6, "length": 3, "type": "italic"}
+            offset=6,
+            length=3,
+            type="italic",
+            model_dump=lambda mode, exclude_none: {"offset": 6, "length": 3, "type": "italic"},
         ),
     ]
 
     message = _make_message(
-        message_id=msg_id, chat_id=chat_id, text="hello world",
+        message_id=msg_id,
+        chat_id=chat_id,
+        text="hello world",
         entities=new_entities_obj,
     )
 
@@ -506,7 +601,10 @@ def test_edit_entities_only_change_creates_v2(app_env, monkeypatch) -> None:
     # Old hash: text + old entities
     old_hash = compute_content_hash("hello world", None, "text", old_entities)
     # New hash: text + new entities (different)
-    new_entities_dicts = [{"offset": 0, "length": 5, "type": "bold"}, {"offset": 6, "length": 3, "type": "italic"}]
+    new_entities_dicts = [
+        {"offset": 0, "length": 5, "type": "bold"},
+        {"offset": 6, "length": 3, "type": "italic"},
+    ]
     new_hash = compute_content_hash("hello world", None, "text", new_entities_dicts)
     assert old_hash != new_hash  # sanity: entity change → hash change
 
@@ -526,7 +624,9 @@ def test_edit_entities_only_change_creates_v2(app_env, monkeypatch) -> None:
 
     session = AsyncMock()
     session.refresh = AsyncMock()
-    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing_row)))
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing_row))
+    )
     session.flush = AsyncMock()
 
     monkeypatch.setattr(handler, "_find_chat_message", mock_find)
@@ -561,8 +661,6 @@ def test_edit_on_legacy_v1_recomputes_chv1(app_env, monkeypatch) -> None:
     # Edit arrives with identical text
     message = _make_message(message_id=msg_id, chat_id=chat_id, text="old text")
 
-    from bot.services.content_hash import compute_content_hash
-
     # Simulate the legacy hash (different recipe — for test purposes, just a known string)
     legacy_hash = "legacy_hash_without_chv1_prefix_" + "a" * 32
 
@@ -587,7 +685,9 @@ def test_edit_on_legacy_v1_recomputes_chv1(app_env, monkeypatch) -> None:
 
     session = AsyncMock()
     session.refresh = AsyncMock(side_effect=_refresh_side_effect)
-    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing_row)))
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing_row))
+    )
     session.flush = AsyncMock()
 
     monkeypatch.setattr(handler, "_find_chat_message", mock_find)
