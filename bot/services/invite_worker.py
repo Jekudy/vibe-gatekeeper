@@ -6,9 +6,11 @@ from datetime import datetime, timezone
 from aiogram import Bot
 
 from bot.db.engine import async_session
+from bot.db.repos.application import ApplicationRepo
 from bot.db.repos.invite_outbox import InviteOutboxRepo
+from bot.keyboards.inline import ready_keyboard
 from bot.services import invite as invite_service
-from bot.texts import INVITE_LINK_MSG
+from bot.texts import INVITE_LINK_MSG, PRIVACY_BLOCK_MSG
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,26 @@ async def process_invite_outbox(bot: Bot) -> None:
                 row.last_error = str(exc)[:500]
                 if row.attempt_count >= MAX_INVITE_ATTEMPTS:
                     row.status = "failed"
+                    # Hotfix CRIT-02-r3: outbox failed (DMs likely blocked).
+                    # Flip app back to privacy_block so /start + ready_keyboard
+                    # recovery flow works. Without this — applicant stuck
+                    # forever with status=vouched + no invite + dead "Я готов".
+                    await ApplicationRepo.update_status(
+                        session, row.application_id, "privacy_block"
+                    )
+                    try:
+                        await bot.send_message(
+                            chat_id=row.user_id,
+                            text=PRIVACY_BLOCK_MSG,
+                            reply_markup=ready_keyboard(row.application_id),
+                        )
+                    except Exception:
+                        # Если DM всё ещё закрыт — applicant увидит сообщение
+                        # при следующем /start (handle status=privacy_block).
+                        logger.warning(
+                            "Could not DM privacy_block fallback for app %s",
+                            row.application_id,
+                        )
                 logger.warning(
                     "Invite outbox row %s failed attempt %s/%s for app %s: %s",
                     row.id,
