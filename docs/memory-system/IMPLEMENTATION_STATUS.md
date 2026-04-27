@@ -1,6 +1,6 @@
 # Memory System — Implementation Status
 
-**Last updated:** 2026-04-26 (cycle start)
+**Last updated:** 2026-04-27
 **Branch:** `feat/memory-foundation` (worktree `.worktrees/memory`)
 **Source of truth:** this file is updated after every PR merge into `main`.
 
@@ -86,6 +86,12 @@ Three parallel tracks possible from day 1 (no shared deps):
 - Track B: #91 schema doc → #93 user mapping → #94 parser
 - Track C: #92 forget_events → #95/#96/#97/#105 (all parallel after #92)
 
+### Phase 2 — Stream Bravo progress
+
+| Issue | Ticket   | Status | Notes |
+|-------|----------|--------|-------|
+| #91   | T2-NEW-A | done   | Sprint Bravo-01 / PR #TBD. Two-commit branch (286b46a + 3f691bc). New `docs/memory-system/telegram-desktop-export-schema.md` (10 sections: envelope, message envelope, message_kind taxonomy + mixed-array text form, edit history, reply/forward fields, identity (anonymous channel), media references, #offrecord governance quote from AUTHORIZED_SCOPE.md, schema versioning, out-of-scope cross-refs). Three anonymized fixtures under `tests/fixtures/td_export/`: `small_chat.json` (6 msgs incl. mixed-array text edge case), `edited_messages.json` (5 msgs with both #nomem and #offrecord), `replies_with_media.json` (8 msgs with A→B→C reply chain, anonymous channel post, dangling reply for #98). 12 stdlib-only tests in `tests/fixtures/test_td_export_fixtures.py` (all pass). Unblocks #93, #94, #98, #99, #103, #106. |
+
 ## Phases 4–12
 
 Not started. Not authorized. See `AUTHORIZED_SCOPE.md` for gating rules.
@@ -137,3 +143,5 @@ After each PR merge into `main`:
 4. If a ticket is split or new follow-ups appear, add rows. Never silently delete a row — if
    superseded, write `superseded by T#-##` in Notes.
 5. Update `Last updated` at the top.
+
+<!-- updated-by-superflow:2026-04-27 -->

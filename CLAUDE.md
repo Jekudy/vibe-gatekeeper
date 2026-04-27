@@ -47,6 +47,13 @@ separate worktree (`feat/memory-foundation`). Read these BEFORE touching anythin
 4. `docs/memory-system/ROADMAP.md` — at-a-glance phase table with gates.
 5. `docs/memory-system/DEV_SETUP.md` — isolated dev postgres + dev bot live ingestion testing
    protocol (sandbox-first; real chat requires team-lead approval).
+6. `docs/memory-system/telegram-desktop-export-schema.md` — Telegram Desktop JSON export
+   reference. Read BEFORE touching any code under `bot/services/import_*` or
+   `tests/fixtures/td_export/`. Cross-stream contract: import schema details (envelope,
+   message_kind taxonomy, edit/reply semantics, anonymous channel posts, mixed-array text
+   form), governance quote, and downstream-ticket cross-refs.
 
 Issue tracker for memory cycle: **GitHub Issues** (label `phase:0`, `phase:1`, etc.). The
 `nt` (Notion) plugin remains the tracker for non-memory work in this repo if any.
+
+<!-- updated-by-superflow:2026-04-27 -->
