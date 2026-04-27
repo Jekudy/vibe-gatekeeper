@@ -368,7 +368,16 @@ class VouchLog(Base):
 
 class InviteOutbox(Base):
     __tablename__ = "invite_outbox"
-    __table_args__ = (Index("ix_invite_outbox_status", "status"),)
+    __table_args__ = (
+        Index("ix_invite_outbox_status", "status"),
+        Index(
+            "ix_invite_outbox_pending_unique",
+            "application_id",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+            sqlite_where=text("status = 'pending'"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     application_id: Mapped[int] = mapped_column(

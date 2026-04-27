@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -9,6 +10,12 @@ import pytest
 from tests.conftest import import_module
 
 pytestmark = pytest.mark.usefixtures("app_env")
+
+_user_id_counter = itertools.count(start=9_100_000_000)
+
+
+def _next_user_id() -> int:
+    return next(_user_id_counter)
 
 
 class _ExecuteResult:
@@ -191,7 +198,7 @@ def test_outbox_worker_retries_on_failure(monkeypatch) -> None:
     session.commit.assert_awaited_once()
 
 
-def test_outbox_worker_marks_failed_after_5_attempts(monkeypatch) -> None:
+def test_invite_worker_exhausted_pending_app_demoted(monkeypatch, caplog) -> None:
     worker = import_module("bot.services.invite_worker")
     row = SimpleNamespace(
         id=1,
@@ -204,8 +211,19 @@ def test_outbox_worker_marks_failed_after_5_attempts(monkeypatch) -> None:
         last_error=None,
         sent_at=None,
     )
+    app = SimpleNamespace(id=101, status="pending")
     session = SimpleNamespace(commit=AsyncMock())
     bot = SimpleNamespace(send_message=AsyncMock())
+
+    async def cas_update(session_arg, app_id, expected_from, new_status, **extra_fields):
+        assert session_arg is session
+        assert app_id == app.id
+        assert expected_from == "pending"
+        assert extra_fields == {}
+        if app.status != expected_from:
+            return False
+        app.status = new_status
+        return True
 
     monkeypatch.setattr(worker, "async_session", lambda: _SessionContext(session))
     monkeypatch.setattr(worker.InviteOutboxRepo, "get_pending", AsyncMock(return_value=[row]))
@@ -214,17 +232,213 @@ def test_outbox_worker_marks_failed_after_5_attempts(monkeypatch) -> None:
         "create_invite",
         AsyncMock(side_effect=RuntimeError("privacy blocked")),
     )
-    update_status_mock = AsyncMock()
-    monkeypatch.setattr(worker.ApplicationRepo, "update_status", update_status_mock)
+    update_status_if_mock = AsyncMock(side_effect=cas_update)
+    get_mock = AsyncMock(return_value=app)
+    monkeypatch.setattr(worker.ApplicationRepo, "update_status_if", update_status_if_mock)
+    monkeypatch.setattr(worker.ApplicationRepo, "get", get_mock)
+    caplog.set_level("WARNING", logger=worker.logger.name)
 
     asyncio.run(worker.process_invite_outbox(bot))
 
     assert row.status == "failed"
     assert row.attempt_count == 5
     assert row.last_error == "privacy blocked"
-    update_status_mock.assert_awaited_once_with(session, 101, "privacy_block")
+    assert app.status == "privacy_block"
+    update_status_if_mock.assert_awaited_once_with(
+        session,
+        app_id=101,
+        expected_from="pending",
+        new_status="privacy_block",
+    )
+    get_mock.assert_not_awaited()
     bot.send_message.assert_awaited_once()
     session.commit.assert_awaited_once()
+    assert any("failed attempt 5/5" in record.message for record in caplog.records)
+
+
+def test_invite_worker_exhausted_vouched_app_preserved(monkeypatch, caplog) -> None:
+    worker = import_module("bot.services.invite_worker")
+    row = SimpleNamespace(
+        id=1,
+        application_id=101,
+        user_id=3002,
+        chat_id=-100123,
+        status="pending",
+        invite_link=None,
+        attempt_count=4,
+        last_error=None,
+        sent_at=None,
+    )
+    app = SimpleNamespace(id=101, status="vouched")
+    session = SimpleNamespace(commit=AsyncMock())
+    bot = SimpleNamespace(send_message=AsyncMock())
+
+    async def cas_update(session_arg, app_id, expected_from, new_status, **extra_fields):
+        assert session_arg is session
+        assert app_id == app.id
+        assert expected_from == "pending"
+        assert extra_fields == {}
+        if app.status != expected_from:
+            return False
+        app.status = new_status
+        return True
+
+    monkeypatch.setattr(worker, "async_session", lambda: _SessionContext(session))
+    monkeypatch.setattr(worker.InviteOutboxRepo, "get_pending", AsyncMock(return_value=[row]))
+    monkeypatch.setattr(
+        worker.invite_service,
+        "create_invite",
+        AsyncMock(side_effect=RuntimeError("privacy blocked")),
+    )
+    update_status_if_mock = AsyncMock(side_effect=cas_update)
+    get_mock = AsyncMock(return_value=app)
+    monkeypatch.setattr(worker.ApplicationRepo, "update_status_if", update_status_if_mock)
+    monkeypatch.setattr(worker.ApplicationRepo, "get", get_mock)
+    caplog.set_level("WARNING", logger=worker.logger.name)
+
+    asyncio.run(worker.process_invite_outbox(bot))
+
+    assert row.status == "failed"
+    assert row.attempt_count == 5
+    assert row.last_error == "privacy blocked"
+    assert app.status == "vouched"
+    update_status_if_mock.assert_awaited_once_with(
+        session,
+        app_id=101,
+        expected_from="pending",
+        new_status="privacy_block",
+    )
+    get_mock.assert_awaited_once_with(session, 101)
+    bot.send_message.assert_not_called()
+    session.commit.assert_awaited_once()
+    records = [
+        record
+        for record in caplog.records
+        if record.message == "invite_worker.privacy_block_skipped"
+    ]
+    assert len(records) == 1
+    assert records[0].app_id == 101
+    assert records[0].observed_status == "vouched"
+
+
+def test_invite_worker_exhausted_added_app_preserved(monkeypatch, caplog) -> None:
+    worker = import_module("bot.services.invite_worker")
+    row = SimpleNamespace(
+        id=1,
+        application_id=101,
+        user_id=3002,
+        chat_id=-100123,
+        status="pending",
+        invite_link=None,
+        attempt_count=4,
+        last_error=None,
+        sent_at=None,
+    )
+    app = SimpleNamespace(id=101, status="added")
+    session = SimpleNamespace(commit=AsyncMock())
+    bot = SimpleNamespace(send_message=AsyncMock())
+
+    async def cas_update(session_arg, app_id, expected_from, new_status, **extra_fields):
+        assert session_arg is session
+        assert app_id == app.id
+        assert expected_from == "pending"
+        assert extra_fields == {}
+        if app.status != expected_from:
+            return False
+        app.status = new_status
+        return True
+
+    monkeypatch.setattr(worker, "async_session", lambda: _SessionContext(session))
+    monkeypatch.setattr(worker.InviteOutboxRepo, "get_pending", AsyncMock(return_value=[row]))
+    monkeypatch.setattr(
+        worker.invite_service,
+        "create_invite",
+        AsyncMock(side_effect=RuntimeError("privacy blocked")),
+    )
+    update_status_if_mock = AsyncMock(side_effect=cas_update)
+    get_mock = AsyncMock(return_value=app)
+    monkeypatch.setattr(worker.ApplicationRepo, "update_status_if", update_status_if_mock)
+    monkeypatch.setattr(worker.ApplicationRepo, "get", get_mock)
+    caplog.set_level("WARNING", logger=worker.logger.name)
+
+    asyncio.run(worker.process_invite_outbox(bot))
+
+    assert row.status == "failed"
+    assert row.attempt_count == 5
+    assert row.last_error == "privacy blocked"
+    assert app.status == "added"
+    update_status_if_mock.assert_awaited_once_with(
+        session,
+        app_id=101,
+        expected_from="pending",
+        new_status="privacy_block",
+    )
+    get_mock.assert_awaited_once_with(session, 101)
+    bot.send_message.assert_not_called()
+    session.commit.assert_awaited_once()
+    records = [
+        record
+        for record in caplog.records
+        if record.message == "invite_worker.privacy_block_skipped"
+    ]
+    assert len(records) == 1
+    assert records[0].app_id == 101
+    assert records[0].observed_status == "added"
+
+
+async def test_invite_outbox_unique_pending_per_application(db_session) -> None:
+    from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
+
+    from bot.db.models import InviteOutbox
+    from bot.db.repos.application import ApplicationRepo
+    from bot.db.repos.user import UserRepo
+
+    connection = await db_session.connection()
+    if connection.dialect.name != "postgresql":
+        pytest.skip("invite_outbox pending partial unique index is postgres-only")
+
+    user_id = _next_user_id()
+    await UserRepo.upsert(
+        db_session,
+        telegram_id=user_id,
+        username=f"u{user_id}",
+        first_name="T",
+        last_name=None,
+    )
+    app = await ApplicationRepo.create(db_session, user_id)
+    await ApplicationRepo.update_status(db_session, app.id, "pending")
+
+    first = InviteOutbox(
+        application_id=app.id,
+        user_id=user_id,
+        chat_id=-100123,
+        status="pending",
+    )
+    db_session.add(first)
+    await db_session.flush()
+
+    with pytest.raises(IntegrityError):
+        async with db_session.begin_nested():
+            db_session.add(
+                InviteOutbox(
+                    application_id=app.id,
+                    user_id=user_id,
+                    chat_id=-100123,
+                    status="pending",
+                )
+            )
+            await db_session.flush()
+
+    rows = (
+        await db_session.execute(
+            select(InviteOutbox).where(
+                InviteOutbox.application_id == app.id,
+                InviteOutbox.status == "pending",
+            )
+        )
+    ).scalars().all()
+    assert [row.id for row in rows] == [first.id]
 
 
 def test_invite_outbox_model_registered() -> None:
@@ -246,4 +460,11 @@ def test_invite_outbox_model_registered() -> None:
         "created_at",
         "sent_at",
     } == cols
-    assert "ix_invite_outbox_status" in {ix.name for ix in table.indexes}
+    indexes = {ix.name: ix for ix in table.indexes}
+    assert "ix_invite_outbox_status" in indexes
+    assert "ix_invite_outbox_pending_unique" in indexes
+    pending_unique = indexes["ix_invite_outbox_pending_unique"]
+    assert pending_unique.unique is True
+    assert str(pending_unique.dialect_options["postgresql"]["where"]) == (
+        "status = 'pending'"
+    )
