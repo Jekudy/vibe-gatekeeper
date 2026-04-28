@@ -22,9 +22,10 @@ Coverage:
 from __future__ import annotations
 
 import asyncio
+import itertools
 import random
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -409,9 +410,6 @@ def test_forget_replied_to_unknown_message_silent(app_env, monkeypatch, caplog) 
 
 # ─── DB-backed tests ──────────────────────────────────────────────────────────
 
-import itertools
-import random as _random
-
 _user_counter_fr = itertools.count(start=9_200_000_000)
 
 
@@ -424,7 +422,7 @@ async def _make_db_user_fr(db_session, *, is_admin: bool = False) -> int:
     from bot.db.repos.user import UserRepo
 
     uid = _next_user_id_fr()
-    user = await UserRepo.upsert(
+    await UserRepo.upsert(
         db_session,
         telegram_id=uid,
         username=f"u{uid}",
@@ -441,13 +439,13 @@ async def _make_db_user_fr(db_session, *, is_admin: bool = False) -> int:
     return uid
 
 
-async def _make_db_chat_message(db_session, *, user_id: int, chat_id: int) -> "ChatMessage":
+async def _make_db_chat_message(db_session, *, user_id: int, chat_id: int):
     """Insert a minimal chat_messages row and return the ORM object."""
     from datetime import datetime, timezone
     from bot.db.models import ChatMessage
 
     msg = ChatMessage(
-        message_id=_random.randint(10_000_000, 99_999_999),
+        message_id=random.randint(10_000_000, 99_999_999),
         chat_id=chat_id,
         user_id=user_id,
         text="hello world",
