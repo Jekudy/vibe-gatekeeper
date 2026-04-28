@@ -341,3 +341,43 @@ def test_redact_scrubs_pinned_and_external_reply(app_env) -> None:
     assert "text" not in redacted["message"]["pinned_message"]
     assert "caption" not in redacted["message"]["external_reply"]
     assert redacted["message"]["pinned_message"]["message_id"] == 1
+
+
+# ─── detect_policy: new keyword-only args (Sprint #89 Commit 2) ────────────────────────────
+
+
+def test_detect_policy_offrecord_in_poll_question(app_env) -> None:
+    """#offrecord in poll_question → offrecord policy, in_poll_question=True."""
+    from bot.services.governance import detect_policy
+
+    policy, mark = detect_policy(None, None, poll_question="hello #offrecord")
+    assert policy == "offrecord"
+    assert mark is not None
+    assert mark.get("in_poll_question") is True
+
+
+def test_detect_policy_nomem_in_contact_name(app_env) -> None:
+    """#nomem in contact_name → nomem policy, in_contact_name=True."""
+    from bot.services.governance import detect_policy
+
+    policy, mark = detect_policy(None, None, contact_name="Alice #nomem")
+    assert policy == "nomem"
+    assert mark is not None
+    assert mark.get("in_contact_name") is True
+
+
+def test_detect_policy_offrecord_in_forward_text(app_env) -> None:
+    """#offrecord in forward_text → offrecord policy."""
+    from bot.services.governance import detect_policy
+
+    policy, mark = detect_policy(None, None, forward_text="see #offrecord")
+    assert policy == "offrecord"
+    assert mark is not None
+
+
+def test_detect_policy_offrecord_precedence_over_nomem_across_fields(app_env) -> None:
+    """#nomem in text + #offrecord in poll_question → offrecord wins (stricter)."""
+    from bot.services.governance import detect_policy
+
+    policy, _ = detect_policy("a #nomem", None, poll_question="b #offrecord")
+    assert policy == "offrecord"

@@ -43,42 +43,64 @@ def _contains(pattern: re.Pattern[str], value: str | None) -> bool:
     return bool(pattern.search(value))
 
 
-def detect_policy(text: str | None, caption: str | None) -> tuple[PolicyOutcome, dict | None]:
-    """Run deterministic detection over text + caption.
+def detect_policy(
+    text: str | None,
+    caption: str | None,
+    *,
+    poll_question: str | None = None,
+    contact_name: str | None = None,
+    forward_text: str | None = None,
+    forward_caption: str | None = None,
+) -> tuple[PolicyOutcome, dict | None]:
+    """Run deterministic detection over text, caption, and optional extra fields.
 
     Returns ``(policy, mark_payload)``:
     - ``policy`` is one of ``"normal"`` / ``"nomem"`` / ``"offrecord"``.
     - ``mark_payload`` is ``None`` for ``"normal"``; otherwise a dict with audit
       metadata for the ``offrecord_marks`` row.
 
-    Detection rules:
-    - ``#offrecord`` in text or caption → ``"offrecord"`` (takes precedence).
-    - Else ``#nomem`` in text or caption → ``"nomem"``.
+    Detection rules (all fields scanned; offrecord > nomem):
+    - ``#offrecord`` in any of: text, caption, poll_question, contact_name,
+      forward_text, forward_caption → ``"offrecord"`` (takes precedence).
+    - Else ``#nomem`` in any of those fields → ``"nomem"``.
     - Else → ``"normal"``.
+
+    Keyword-only args (``poll_question``, ``contact_name``, ``forward_text``,
+    ``forward_caption``) default to None for full backward compatibility — callers
+    that pass only ``(text, caption)`` positionally (e.g. import_parser.py,
+    ingestion.py) keep working unchanged.
 
     Token matching is case-insensitive. Hashtags must stand alone — ``#nomembership``
     and ``some#nomem`` do NOT match.
     """
-    has_offrecord = _contains(_OFFRECORD_PATTERN, text) or _contains(_OFFRECORD_PATTERN, caption)
-    if has_offrecord:
+    # offrecord scan across all 6 fields
+    or_fields = {
+        "in_text": _contains(_OFFRECORD_PATTERN, text),
+        "in_caption": _contains(_OFFRECORD_PATTERN, caption),
+        "in_poll_question": _contains(_OFFRECORD_PATTERN, poll_question),
+        "in_contact_name": _contains(_OFFRECORD_PATTERN, contact_name),
+        "in_forward_text": _contains(_OFFRECORD_PATTERN, forward_text),
+        "in_forward_caption": _contains(_OFFRECORD_PATTERN, forward_caption),
+    }
+    if any(or_fields.values()):
         return (
             "offrecord",
-            {
-                "detected_by": _DETECTED_BY,
-                "in_text": _contains(_OFFRECORD_PATTERN, text),
-                "in_caption": _contains(_OFFRECORD_PATTERN, caption),
-            },
+            {"detected_by": _DETECTED_BY, **or_fields},
         )
 
-    has_nomem = _contains(_NOMEM_PATTERN, text) or _contains(_NOMEM_PATTERN, caption)
-    if has_nomem:
+    # nomem scan across all 6 fields
+    nm_fields = {
+        "in_text": _contains(_NOMEM_PATTERN, text),
+        "in_caption": _contains(_NOMEM_PATTERN, caption),
+        "in_poll_question": _contains(_NOMEM_PATTERN, poll_question),
+        "in_contact_name": _contains(_NOMEM_PATTERN, contact_name),
+        "in_forward_text": _contains(_NOMEM_PATTERN, forward_text),
+        "in_forward_caption": _contains(_NOMEM_PATTERN, forward_caption),
+    }
+    if any(nm_fields.values()):
         return (
             "nomem",
-            {
-                "detected_by": _DETECTED_BY,
-                "in_text": _contains(_NOMEM_PATTERN, text),
-                "in_caption": _contains(_NOMEM_PATTERN, caption),
-            },
+            {"detected_by": _DETECTED_BY, **nm_fields},
         )
 
     return ("normal", None)
