@@ -10,6 +10,10 @@ from tests.conftest import import_module
 
 def test_save_chat_message_does_not_auto_mark_member(app_env, monkeypatch) -> None:
     handler = import_module("bot.handlers.chat_messages")
+    # After Sprint #89 refactor, MessageRepo.save is called inside
+    # persist_message_with_policy (bot.services.message_persistence), not directly
+    # in the handler. Patch through the service module instead.
+    persistence_module = import_module("bot.services.message_persistence")
     session = AsyncMock()
     raw_json = {"message_id": 101, "text": "hello from chat"}
     message_date = datetime.now(timezone.utc)
@@ -25,15 +29,42 @@ def test_save_chat_message_does_not_auto_mark_member(app_env, monkeypatch) -> No
         text="hello from chat",
         date=message_date,
         model_dump=Mock(return_value=raw_json),
+        # Fields required by extract_normalized_fields / classify_message_kind:
+        reply_to_message=None,
+        message_thread_id=None,
+        photo=None,
+        video=None,
+        voice=None,
+        audio=None,
+        document=None,
+        sticker=None,
+        animation=None,
+        video_note=None,
+        location=None,
+        contact=None,
+        poll=None,
+        dice=None,
+        forward_origin=None,
+        new_chat_members=None,
+        left_chat_member=None,
+        pinned_message=None,
+        caption=None,
+        entities=None,
+        caption_entities=None,
     )
 
     user_upsert = AsyncMock()
     user_set_member = AsyncMock()
     message_save = AsyncMock()
+    fake_row = Mock()
+    fake_row.id = 1
+    message_save.return_value = fake_row
 
     monkeypatch.setattr(handler.UserRepo, "upsert", user_upsert)
     monkeypatch.setattr(handler.UserRepo, "set_member", user_set_member)
-    monkeypatch.setattr(handler.MessageRepo, "save", message_save)
+    monkeypatch.setattr(persistence_module.MessageRepo, "save", message_save)
+    # Also patch advisory_lock so no real postgres is needed.
+    monkeypatch.setattr(persistence_module, "advisory_lock_chat_message", AsyncMock())
 
     asyncio.run(handler.save_chat_message(message, session))
 
@@ -49,7 +80,8 @@ def test_save_chat_message_does_not_auto_mark_member(app_env, monkeypatch) -> No
     # memory_policy + is_redacted (the handler now calls detect_policy on every
     # message; for plain text 'hello from chat' the policy is 'normal',
     # is_redacted=False). SimpleNamespace without media/reply attrs resolves
-    # extras to None / 'text'.
+    # extras to None / 'text'. Sprint #89: the call now goes through
+    # persist_message_with_policy but the kwargs contract is unchanged.
     message_save.assert_awaited_once_with(
         session,
         message_id=101,
@@ -62,6 +94,7 @@ def test_save_chat_message_does_not_auto_mark_member(app_env, monkeypatch) -> No
         message_thread_id=None,
         caption=None,
         message_kind="text",
+        raw_update_id=None,
         memory_policy="normal",
         is_redacted=False,
     )
