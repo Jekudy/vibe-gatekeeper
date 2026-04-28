@@ -79,6 +79,14 @@ Read these BEFORE touching anything under `bot/db/`, `bot/services/`,
    `governance.detect_policy` invocation contract (called per user message, service messages
    skipped), operator pre-flight role before any #103 apply run. Cross-refs #91 schema, #93
    user mapping, #106 edit-history policy.
+10. `docs/memory-system/import-reply-resolver.md` — Telegram Desktop import reply resolver. Read
+    BEFORE touching `bot/services/import_reply_resolver.py` or before #99 (T2-02 dry-run stats) /
+    #103 (T2-03 apply) consume reply mappings. Defines: priority order (same_run → prior_run →
+    live → unresolved), chat_id scoping (never resolves across chat boundaries), batch query
+    semantics (3 queries max regardless of N — no N+1), `ReplyResolution` / `ReplyResolverStats`
+    API contract, read-only invariant (NO DB writes; safe inside any transaction), forward-chain
+    direct-lookup design choice (chain_depth always 0; consumers iterate if they need deeper
+    traversal). Cross-refs #91 schema, #93 user mapping, #94 dry-run parser.
 
 Issue tracker for memory cycle: **GitHub Issues** (label `phase:0`, `phase:1`, etc.). The
 `nt` (Notion) plugin remains the tracker for non-memory work in this repo if any.
