@@ -74,38 +74,71 @@ async def _cascade_chat_messages(session: AsyncSession, event) -> int:
 
     Returns the number of rows affected.
 
-    Currently supports ``target_type='message'`` only — the row is selected by
-    ``ChatMessage.id == int(target_id)``. Other target types (``user``,
-    ``message_hash``, ``export``) are reserved for Sprint 4 / #105 (/forget_me)
-    and re-import prevention (#97); calling them here returns 0 rows.
+    Supported target_types:
+    - ``message``: single row by ``ChatMessage.id == int(target_id)``.
+    - ``user``: all rows by ``ChatMessage.user_id == CAST(target_id AS BIGINT)``
+      (User.id == telegram_id per codebase invariant).
+
+    Other target types (``message_hash``, ``export``) are reserved for future
+    streams (#97, #105); the caller (``_process_one_event``) must NOT invoke
+    this function for them — it skips them before reaching ``_LAYER_FUNCS``.
     """
-    if event.target_type != "message" or event.target_id is None:
-        return 0
-
-    try:
-        cm_id = int(event.target_id)
-    except (TypeError, ValueError):
-        # target_id for ``message`` MUST be an integer chat_messages.id; reject
-        # rather than silently no-op so a malformed event surfaces as failed.
+    if event.target_id is None:
         raise ValueError(
-            f"forget_event target_type='message' requires integer target_id; "
-            f"got {event.target_id!r}"
+            f"forget_event target_type={event.target_type!r} requires a non-None target_id"
         )
 
-    stmt = (
-        update(ChatMessage)
-        .where(ChatMessage.id == cm_id)
-        .values(
-            text=None,
-            caption=None,
-            raw_json=None,
-            is_redacted=True,
-            memory_policy="forgotten",
+    if event.target_type == "message":
+        try:
+            cm_id = int(event.target_id)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"forget_event target_type='message' requires integer target_id; "
+                f"got {event.target_id!r}"
+            )
+        stmt = (
+            update(ChatMessage)
+            .where(ChatMessage.id == cm_id)
+            .values(
+                text=None,
+                caption=None,
+                raw_json=None,
+                is_redacted=True,
+                memory_policy="forgotten",
+            )
         )
+        result = await session.execute(stmt)
+        await session.flush()
+        return result.rowcount or 0
+
+    if event.target_type == "user":
+        try:
+            telegram_id = int(event.target_id)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"forget_event target_type='user' requires integer target_id (telegram_id); "
+                f"got {event.target_id!r}"
+            )
+        stmt = (
+            update(ChatMessage)
+            .where(ChatMessage.user_id == telegram_id)
+            .values(
+                text=None,
+                caption=None,
+                raw_json=None,
+                is_redacted=True,
+                memory_policy="forgotten",
+            )
+        )
+        result = await session.execute(stmt)
+        await session.flush()
+        return result.rowcount or 0
+
+    # Should not reach here: _process_one_event guards unsupported target_types
+    # before calling _LAYER_FUNCS.  Raise so a regression surfaces immediately.
+    raise ValueError(
+        f"_cascade_chat_messages: unsupported target_type={event.target_type!r}"
     )
-    result = await session.execute(stmt)
-    await session.flush()
-    return result.rowcount or 0
 
 
 async def _cascade_message_versions(session: AsyncSession, event) -> int:
@@ -122,32 +155,78 @@ async def _cascade_message_versions(session: AsyncSession, event) -> int:
     PRIVACY_LEAK_CLASS_4).
 
     Returns the number of rows affected.
+
+    Supported target_types:
+    - ``message``: versions for the single chat_messages row.
+    - ``user``: versions for ALL chat_messages rows owned by the user.
+      Because ``_cascade_chat_messages`` NULLs text/caption/raw_json but does
+      NOT touch ``user_id``, the subquery ``WHERE user_id = telegram_id``
+      still resolves correctly.
     """
-    if event.target_type != "message" or event.target_id is None:
-        return 0
-
-    try:
-        cm_id = int(event.target_id)
-    except (TypeError, ValueError):
+    if event.target_id is None:
         raise ValueError(
-            f"forget_event target_type='message' requires integer target_id; "
-            f"got {event.target_id!r}"
+            f"forget_event target_type={event.target_type!r} requires a non-None target_id"
         )
 
-    stmt = (
-        update(MessageVersion)
-        .where(MessageVersion.chat_message_id == cm_id)
-        .values(
-            text=None,
-            caption=None,
-            normalized_text=None,
-            entities_json=None,
-            is_redacted=True,
+    if event.target_type == "message":
+        try:
+            cm_id = int(event.target_id)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"forget_event target_type='message' requires integer target_id; "
+                f"got {event.target_id!r}"
+            )
+        stmt = (
+            update(MessageVersion)
+            .where(MessageVersion.chat_message_id == cm_id)
+            .values(
+                text=None,
+                caption=None,
+                normalized_text=None,
+                entities_json=None,
+                is_redacted=True,
+            )
         )
+        result = await session.execute(stmt)
+        await session.flush()
+        return result.rowcount or 0
+
+    if event.target_type == "user":
+        try:
+            telegram_id = int(event.target_id)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"forget_event target_type='user' requires integer target_id (telegram_id); "
+                f"got {event.target_id!r}"
+            )
+        # Select version ids via subquery on chat_messages.user_id. The previous
+        # layer NULLed text/caption/raw_json but user_id column is untouched, so
+        # this subquery resolves correctly regardless of layer order.
+        from sqlalchemy import select as sa_select
+
+        stmt = (
+            update(MessageVersion)
+            .where(
+                MessageVersion.chat_message_id.in_(
+                    sa_select(ChatMessage.id).where(ChatMessage.user_id == telegram_id)
+                )
+            )
+            .values(
+                text=None,
+                caption=None,
+                normalized_text=None,
+                entities_json=None,
+                is_redacted=True,
+            )
+        )
+        result = await session.execute(stmt)
+        await session.flush()
+        return result.rowcount or 0
+
+    # Should not reach here: _process_one_event guards unsupported target_types.
+    raise ValueError(
+        f"_cascade_message_versions: unsupported target_type={event.target_type!r}"
     )
-    result = await session.execute(stmt)
-    await session.flush()
-    return result.rowcount or 0
 
 
 # Map layer name → cascade function. Only Phase 1 layers have functions here;
@@ -174,6 +253,12 @@ async def _process_one_event(session: AsyncSession, event) -> None:
     # Snapshot current per-layer progress so we can resume.
     cascade_state: dict[str, Any] = dict(event.cascade_status or {})
 
+    # target_types whose cascade is not yet implemented. The event still finalises
+    # as 'completed' (all layers explicitly accounted for), but each layer records
+    # status='skipped' so the audit trail shows no work was done.
+    # Stream Delta #97 (message_hash) and Bravo importer (#105) will fill these in.
+    _SKIP_TARGET_TYPES = frozenset({"message_hash", "export"})
+
     try:
         for layer in CASCADE_LAYER_ORDER:
             existing = cascade_state.get(layer)
@@ -181,7 +266,22 @@ async def _process_one_event(session: AsyncSession, event) -> None:
                 # Already done in a previous run — skip.
                 continue
 
-            if layer in _LAYER_FUNCS:
+            if event.target_type in _SKIP_TARGET_TYPES:
+                # Unsupported target_type: record skip with reason so the audit
+                # trail is explicit. Phase 4+ layers with table_not_exists also
+                # land here as skipped, but with a different reason.
+                if layer in _LAYER_FUNCS:
+                    cascade_state[layer] = {
+                        "status": "skipped",
+                        "reason": "target_type_not_supported_yet",
+                        "rows": 0,
+                    }
+                else:
+                    cascade_state[layer] = {
+                        "status": "skipped",
+                        "reason": "table_not_exists",
+                    }
+            elif layer in _LAYER_FUNCS:
                 rows = await _LAYER_FUNCS[layer](session, event)
                 cascade_state[layer] = {"status": "completed", "rows": rows}
             else:

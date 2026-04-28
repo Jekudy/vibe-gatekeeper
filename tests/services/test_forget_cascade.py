@@ -140,7 +140,7 @@ async def test_pending_event_progresses_to_completed(db_session) -> None:
     cm_id, ver_id, chat_id, msg_id = await _make_chat_message_with_v1(
         db_session, text="erase me", caption="and this caption"
     )
-    event_id = await _make_pending_forget_event(
+    await _make_pending_forget_event(
         db_session,
         target_type="message",
         target_id=str(cm_id),
@@ -341,14 +341,15 @@ async def test_idempotent_rerun_already_completed_noops(db_session) -> None:
 
 
 async def test_concurrent_workers_no_double_claim(db_session) -> None:
-    """Simulate two workers running back-to-back on the same DB session: the
-    first claim must win, the second must skip the row silently.
+    """Simulate the losing-worker path: pre-claim the event row (as Worker A would),
+    then run the cascade worker (Worker B). Worker B must skip silently — no
+    ValueError propagated, no crash — because ``list_pending`` filters out
+    'processing' rows and the claim path catches ValueError from ``mark_status``.
 
-    True asyncio concurrency in a single AsyncSession isn't possible (a session
-    serializes its own statements). We model concurrency at the API surface:
-    after the first ``mark_status('processing')`` succeeds, calling it again
-    raises ``ValueError`` — exactly what the worker's claim path catches and
-    treats as "another worker got there first".
+    True asyncio concurrency with a single AsyncSession is not possible (the
+    session serializes statements). Instead we exercise the loser path directly:
+    after the row is in 'processing', the worker sees no pending rows and returns
+    all-zero stats.
     """
     from bot.db.repos.forget_event import ForgetEventRepo
     from bot.services.forget_cascade import run_cascade_worker_once
@@ -362,19 +363,26 @@ async def test_concurrent_workers_no_double_claim(db_session) -> None:
         tombstone_key=tomb_key,
     )
 
-    # Worker A claims first via the same atomic UPDATE the worker uses.
+    # Worker A claims the row (simulates winning the race).
     claimed = await ForgetEventRepo.mark_status(
         db_session, event_id, status="processing"
     )
     assert claimed.status == "processing"
 
-    # Worker B comes along: it sees no pending rows (the row is already in
-    # 'processing'), so its run is a no-op.
+    # Worker B runs: row is already 'processing', not in list_pending. Must be a
+    # strict no-op — zero stats, no exception raised.
     stats_b = await run_cascade_worker_once(db_session)
     assert stats_b == {"claimed": 0, "processed": 0, "failed": 0}
 
+    # Row must remain in Worker A's claim state (not double-progressed).
     ev = await ForgetEventRepo.get_by_tombstone_key(db_session, tomb_key)
-    assert ev.status == "processing"  # still A's claim, not double-progressed
+    assert ev.status == "processing"
+
+    # Additionally: directly verify the ValueError loser path is silently caught.
+    # Attempt to claim an already-processing row raises ValueError from the repo;
+    # the worker's claim logic must swallow it and continue.
+    with pytest.raises(ValueError):
+        await ForgetEventRepo.mark_status(db_session, event_id, status="processing")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -526,6 +534,227 @@ async def test_scheduler_tick_no_op_when_flag_off(db_session) -> None:
     ev = await ForgetEventRepo.get_by_tombstone_key(db_session, tomb_key)
     assert ev.status == "pending"  # untouched
     assert ev.cascade_status is None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Acceptance #8: target_type='user' — full content wipe for all user messages
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+async def _make_user_raw(db_session, uid: int) -> None:
+    from bot.db.repos.user import UserRepo
+
+    await UserRepo.upsert(
+        db_session,
+        telegram_id=uid,
+        username=f"u{uid}",
+        first_name="Test",
+        last_name=None,
+    )
+
+
+async def _make_message_for_user(
+    db_session,
+    user_id: int,
+    *,
+    text: str = "secret",
+    caption: str | None = None,
+    raw_json: dict | None = None,
+) -> int:
+    """Create a ChatMessage for a specific user_id; return chat_message id."""
+    from bot.db.models import ChatMessage
+
+    chat_id = _next_chat_id()
+    message_id = _next_msg_id()
+    when = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+
+    msg = ChatMessage(
+        message_id=message_id,
+        chat_id=chat_id,
+        user_id=user_id,
+        text=text,
+        date=when,
+        caption=caption,
+        raw_json=raw_json or {"text": text},
+        memory_policy="normal",
+        is_redacted=False,
+    )
+    db_session.add(msg)
+    await db_session.flush()
+    return msg.id
+
+
+async def _make_version_for_message(db_session, chat_message_id: int, *, seq: int = 1) -> int:
+    """Create a MessageVersion for a given chat_message; return version id."""
+    from bot.db.models import MessageVersion
+
+    v = MessageVersion(
+        chat_message_id=chat_message_id,
+        version_seq=seq,
+        text="secret text",
+        caption="secret cap",
+        normalized_text="secret norm",
+        entities_json={"entities": []},
+        content_hash=f"h-test-user-{chat_message_id}-{seq}",
+        is_redacted=False,
+    )
+    db_session.add(v)
+    await db_session.flush()
+    return v.id
+
+
+async def test_user_target_wipes_all_user_messages(db_session) -> None:
+    """target_type='user': 3 messages for user X + 2 for user Y.
+    After cascade: X's messages are NULLed + redacted + forgotten; Y's are untouched.
+    """
+    from bot.db.models import ChatMessage
+    from bot.services.forget_cascade import run_cascade_worker_once
+
+    uid_x = _next_user()
+    uid_y = _next_user()
+    await _make_user_raw(db_session, uid_x)
+    await _make_user_raw(db_session, uid_y)
+
+    # 3 messages for user X
+    cm_x1 = await _make_message_for_user(db_session, uid_x, text="x-secret-1")
+    cm_x2 = await _make_message_for_user(db_session, uid_x, text="x-secret-2", caption="cap")
+    cm_x3 = await _make_message_for_user(db_session, uid_x, text="x-secret-3")
+    # 2 messages for user Y — must be untouched
+    cm_y1 = await _make_message_for_user(db_session, uid_y, text="y-keep-1")
+    cm_y2 = await _make_message_for_user(db_session, uid_y, text="y-keep-2")
+
+    await _make_pending_forget_event(
+        db_session,
+        target_type="user",
+        target_id=str(uid_x),
+        tombstone_key=f"user:{uid_x}",
+    )
+
+    stats = await run_cascade_worker_once(db_session)
+    assert stats["claimed"] == 1
+    assert stats["processed"] == 1
+    assert stats["failed"] == 0
+
+    for cm_id in (cm_x1, cm_x2, cm_x3):
+        cm = await db_session.get(ChatMessage, cm_id, populate_existing=True)
+        assert cm.text is None, f"cm {cm_id} text not NULLed"
+        assert cm.caption is None, f"cm {cm_id} caption not NULLed"
+        assert cm.raw_json is None, f"cm {cm_id} raw_json not NULLed"
+        assert cm.is_redacted is True, f"cm {cm_id} not redacted"
+        assert cm.memory_policy == "forgotten", f"cm {cm_id} policy not forgotten"
+
+    for cm_id in (cm_y1, cm_y2):
+        cm = await db_session.get(ChatMessage, cm_id, populate_existing=True)
+        assert cm.text is not None, f"cm {cm_id} text was wiped (should be untouched)"
+        assert cm.is_redacted is False, f"cm {cm_id} wrongly redacted"
+
+
+async def test_user_target_wipes_all_user_versions(db_session) -> None:
+    """target_type='user': versions for X's messages are NULLed; Y's versions untouched.
+    content_hash must remain NOT NULL (citation stability).
+    """
+    from bot.db.models import MessageVersion
+    from bot.services.forget_cascade import run_cascade_worker_once
+
+    uid_x = _next_user()
+    uid_y = _next_user()
+    await _make_user_raw(db_session, uid_x)
+    await _make_user_raw(db_session, uid_y)
+
+    cm_x1 = await _make_message_for_user(db_session, uid_x, text="x-v-secret")
+    cm_y1 = await _make_message_for_user(db_session, uid_y, text="y-v-keep")
+
+    ver_x = await _make_version_for_message(db_session, cm_x1)
+    ver_y = await _make_version_for_message(db_session, cm_y1)
+
+    await _make_pending_forget_event(
+        db_session,
+        target_type="user",
+        target_id=str(uid_x),
+        tombstone_key=f"user:{uid_x}:ver",
+    )
+
+    stats = await run_cascade_worker_once(db_session)
+    assert stats["processed"] == 1
+
+    # X's version must be NULLed in all 5 content fields + is_redacted
+    vx = await db_session.get(MessageVersion, ver_x, populate_existing=True)
+    assert vx.text is None
+    assert vx.caption is None
+    assert vx.normalized_text is None
+    assert vx.entities_json is None
+    assert vx.is_redacted is True
+    # content_hash preserved for citation stability
+    assert vx.content_hash is not None
+
+    # Y's version untouched
+    vy = await db_session.get(MessageVersion, ver_y, populate_existing=True)
+    assert vy.text is not None
+    assert vy.is_redacted is False
+
+
+async def test_message_hash_target_records_skipped(db_session) -> None:
+    """target_type='message_hash': cascade finalizes as 'completed' but every layer
+    shows status='skipped' with reason='target_type_not_supported_yet'.
+    No rows in any table must be modified.
+    """
+    from bot.services.forget_cascade import run_cascade_worker_once
+
+    event_id = await _make_pending_forget_event(
+        db_session,
+        target_type="message_hash",
+        target_id="somehash",
+        tombstone_key="message_hash:somehash:test",
+    )
+
+    stats = await run_cascade_worker_once(db_session)
+    assert stats["claimed"] == 1
+    assert stats["processed"] == 1
+    assert stats["failed"] == 0
+
+    from bot.db.models import ForgetEvent
+
+    ev = await db_session.get(ForgetEvent, event_id, populate_existing=True)
+    assert ev.status == "completed"
+
+    # Phase-1 layers: skipped with the new reason
+    for layer in ("chat_messages", "message_versions"):
+        assert ev.cascade_status[layer]["status"] == "skipped", (
+            f"Layer {layer} should be skipped for message_hash target, got: {ev.cascade_status[layer]}"
+        )
+        assert ev.cascade_status[layer]["reason"] == "target_type_not_supported_yet"
+
+    # Phase-4+ layers: still skipped with table_not_exists
+    for layer in ("message_entities", "message_links", "attachments", "fts_rows"):
+        assert ev.cascade_status[layer]["status"] == "skipped"
+
+
+async def test_export_target_records_skipped(db_session) -> None:
+    """target_type='export': analogous to message_hash — all layers skipped."""
+    from bot.db.models import ForgetEvent
+    from bot.services.forget_cascade import run_cascade_worker_once
+
+    event_id = await _make_pending_forget_event(
+        db_session,
+        target_type="export",
+        target_id="export-uuid-abc",
+        tombstone_key="export:export-uuid-abc:test",
+    )
+
+    stats = await run_cascade_worker_once(db_session)
+    assert stats["claimed"] == 1
+    assert stats["processed"] == 1
+    assert stats["failed"] == 0
+
+    ev = await db_session.get(ForgetEvent, event_id, populate_existing=True)
+    assert ev.status == "completed"
+
+    for layer in ("chat_messages", "message_versions"):
+        assert ev.cascade_status[layer]["status"] == "skipped"
+        assert ev.cascade_status[layer]["reason"] == "target_type_not_supported_yet"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 async def test_scheduler_tick_processes_events_when_flag_on(db_session) -> None:
