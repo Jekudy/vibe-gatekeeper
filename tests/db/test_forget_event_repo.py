@@ -502,3 +502,25 @@ async def test_update_cascade_status_rejected_on_missing_id(db_session) -> None:
         await ForgetEventRepo.update_cascade_status(
             db_session, 999_999_999, cascade_status={"x": 1}
         )
+
+
+async def test_update_cascade_status_rejected_in_failed(db_session) -> None:
+    """Cannot checkpoint a row that is already in terminal state 'failed'."""
+    from bot.db.repos.forget_event import ForgetEventRepo
+
+    ev = await ForgetEventRepo.create(
+        db_session,
+        target_type="message",
+        target_id=None,
+        actor_user_id=None,
+        authorized_by="system",
+        tombstone_key=f"message:-failed-cp:{next(_key_counter)}",
+    )
+    await ForgetEventRepo.mark_status(db_session, ev.id, status="processing")
+    await ForgetEventRepo.mark_status(db_session, ev.id, status="failed")
+    assert (await db_session.get(ev.__class__, ev.id, populate_existing=True)).status == "failed"
+
+    with pytest.raises(ValueError, match="failed"):
+        await ForgetEventRepo.update_cascade_status(
+            db_session, ev.id, cascade_status={"x": 1}
+        )
