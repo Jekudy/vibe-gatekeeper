@@ -571,6 +571,7 @@ class IngestionRun(Base):
     run's id (added in later tickets). One long-lived ``run_type='live'`` row exists per
     bot process; ``run_type='import'`` rows are created per Telegram Desktop import (T2-01
     dry-run / T2-03 apply). ``run_type='dry_run'`` for import dry-runs.
+    ``run_type='rolled_back'`` rows are audit records for T2-NEW-G logical rollback.
 
     Status lifecycle: running → completed | failed | cancelled. Dry-runs may use
     ``status='dry_run'`` as a terminal state to make filter queries explicit.
@@ -579,7 +580,7 @@ class IngestionRun(Base):
     __tablename__ = "ingestion_runs"
     __table_args__ = (
         CheckConstraint(
-            "run_type IN ('live','import','dry_run','cancelled')",
+            "run_type IN ('live','import','dry_run','cancelled','rolled_back')",
             name="ck_ingestion_runs_run_type",
         ),
         CheckConstraint(
