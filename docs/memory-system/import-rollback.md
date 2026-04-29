@@ -28,7 +28,9 @@ audit_run_id: 124
 ```
 
 If the run was already rolled back, the command exits `0` and prints
-`(idempotent no-op)` with the existing audit row id.
+`(idempotent no-op; prior audit counts shown)` with the existing audit row id and the
+delete counts from that prior audit row. Those echoed counts are operator context; the
+idempotent caller did not delete additional rows.
 
 ---
 
@@ -82,6 +84,11 @@ The service performs all deletes and the audit insert in one database transactio
 
 If any step fails, the transaction rolls back. Partial rollback is not allowed.
 
+The delete + audit-insert section is protected by a nested transaction/SAVEPOINT. If the
+unique rollback-audit index fires after the pre-check missed a concurrent winner, the
+service rolls back the SAVEPOINT, re-queries the existing audit row while still holding
+the advisory lock, and returns an idempotent report with that prior audit id and counts.
+
 ---
 
 ## Idempotency
@@ -93,9 +100,14 @@ ingestion_runs.run_type = 'rolled_back'
 AND stats_json->>'original_run_id' = <target>
 ```
 
-If an audit row already exists, rollback returns a zero-delete report and does not create
-a second audit row. Migration `019_add_ingestion_runs_rolled_back.py` adds the
+If an audit row already exists, rollback returns an idempotent report with the prior
+audit row's delete counts and does not create a second audit row. Migration
+`019_add_ingestion_runs_rolled_back.py` adds the
 `rolled_back` run type and a unique partial index for this audit key.
+
+Downgrade warning for migration `019`: if any `ingestion_runs` rows with
+`run_type='rolled_back'` still exist, the recreated pre-rollback CHECK constraint will
+fail. Operators must delete those audit rows manually before emergency downgrade.
 
 ---
 
