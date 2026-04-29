@@ -109,8 +109,15 @@ async def rollback_ingestion_run(
                 ingestion_run_id,
             )
 
+            # Use explicit raw SAVEPOINT SQL because session.begin_nested() tracks
+            # connections through the ORM layer; connection.execute() calls bypass
+            # session tracking so session.begin_nested().__aexit__ would find an empty
+            # _connections dict and skip the ROLLBACK TO SAVEPOINT on asyncpg.
+            # Raw text SAVEPOINTs go through AsyncConnection.execute (async path) which
+            # works correctly with asyncpg.
+            await connection.execute(text("SAVEPOINT _rollback_outer"))
             race_report: RollbackReport | None = None
-            async with session.begin_nested():
+            try:
                 chat_delete_result = await connection.execute(
                     text(
                         """
@@ -140,32 +147,41 @@ async def rollback_ingestion_run(
                 )
                 telegram_updates_deleted = _require_rowcount(update_delete_result)
 
-                audit_integrity_error: IntegrityError | None = None
+                # Inner SAVEPOINT for audit-insert race: if concurrent rollback already
+                # wrote the audit row (IntegrityError on unique partial index), we roll
+                # back only this inner savepoint and re-query the winning row.
+                await connection.execute(text("SAVEPOINT _rollback_audit"))
                 try:
-                    async with session.begin_nested():
-                        audit_run_id = await _insert_rollback_audit(
-                            connection,
-                            original_run_id=ingestion_run_id,
-                            chat_messages_deleted=chat_messages_deleted,
-                            telegram_updates_deleted=telegram_updates_deleted,
-                            message_versions_cascade_deleted=message_versions_count,
-                        )
-                except IntegrityError as exc:
-                    audit_integrity_error = exc
-
-            if audit_integrity_error is not None:
-                race_audit = await _find_existing_rollback_audit(
-                    connection,
-                    ingestion_run_id,
-                )
-                if race_audit is None:
-                    raise audit_integrity_error
-
-                race_report = _build_idempotent_report(
-                    ingestion_run_id,
-                    audit_id=race_audit[0],
-                    stats=race_audit[1],
-                )
+                    audit_run_id = await _insert_rollback_audit(
+                        connection,
+                        original_run_id=ingestion_run_id,
+                        chat_messages_deleted=chat_messages_deleted,
+                        telegram_updates_deleted=telegram_updates_deleted,
+                        message_versions_cascade_deleted=message_versions_count,
+                    )
+                except IntegrityError:
+                    await connection.execute(text("ROLLBACK TO SAVEPOINT _rollback_audit"))
+                    race_audit = await _find_existing_rollback_audit(
+                        connection,
+                        ingestion_run_id,
+                    )
+                    if race_audit is None:
+                        await connection.execute(text("ROLLBACK TO SAVEPOINT _rollback_outer"))
+                        raise
+                    race_report = _build_idempotent_report(
+                        ingestion_run_id,
+                        audit_id=race_audit[0],
+                        stats=race_audit[1],
+                    )
+                else:
+                    await connection.execute(text("RELEASE SAVEPOINT _rollback_audit"))
+            except BaseException:
+                # Any error inside outer savepoint (including RuntimeError from DELETE) →
+                # roll back the outer savepoint so all deletes are undone atomically.
+                await connection.execute(text("ROLLBACK TO SAVEPOINT _rollback_outer"))
+                raise
+            else:
+                await connection.execute(text("RELEASE SAVEPOINT _rollback_outer"))
 
             # Commit inside acquire_advisory_lock(): pinned connection keeps the lock; see import_apply.py.
             await session.commit()
