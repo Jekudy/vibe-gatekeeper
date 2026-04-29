@@ -17,7 +17,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import text
-from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
@@ -401,10 +400,3 @@ async def _insert_rollback_audit(
         },
     )
     return int(result.scalar_one())
-
-
-def _require_rowcount(result: CursorResult) -> int:
-    rowcount = result.rowcount
-    if rowcount is None or rowcount < 0:
-        raise RuntimeError("database did not report rollback delete rowcount")
-    return int(rowcount)
