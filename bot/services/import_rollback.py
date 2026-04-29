@@ -140,31 +140,32 @@ async def rollback_ingestion_run(
                 )
                 telegram_updates_deleted = _require_rowcount(update_delete_result)
 
-                audit_savepoint = await session.begin_nested()
+                audit_integrity_error: IntegrityError | None = None
                 try:
-                    audit_run_id = await _insert_rollback_audit(
-                        connection,
-                        original_run_id=ingestion_run_id,
-                        chat_messages_deleted=chat_messages_deleted,
-                        telegram_updates_deleted=telegram_updates_deleted,
-                        message_versions_cascade_deleted=message_versions_count,
-                    )
-                except IntegrityError:
-                    await audit_savepoint.rollback()
-                    race_audit = await _find_existing_rollback_audit(
-                        connection,
-                        ingestion_run_id,
-                    )
-                    if race_audit is None:
-                        raise
+                    async with session.begin_nested():
+                        audit_run_id = await _insert_rollback_audit(
+                            connection,
+                            original_run_id=ingestion_run_id,
+                            chat_messages_deleted=chat_messages_deleted,
+                            telegram_updates_deleted=telegram_updates_deleted,
+                            message_versions_cascade_deleted=message_versions_count,
+                        )
+                except IntegrityError as exc:
+                    audit_integrity_error = exc
 
-                    race_report = _build_idempotent_report(
-                        ingestion_run_id,
-                        audit_id=race_audit[0],
-                        stats=race_audit[1],
-                    )
-                else:
-                    await audit_savepoint.commit()
+            if audit_integrity_error is not None:
+                race_audit = await _find_existing_rollback_audit(
+                    connection,
+                    ingestion_run_id,
+                )
+                if race_audit is None:
+                    raise audit_integrity_error
+
+                race_report = _build_idempotent_report(
+                    ingestion_run_id,
+                    audit_id=race_audit[0],
+                    stats=race_audit[1],
+                )
 
             # Commit inside acquire_advisory_lock(): pinned connection keeps the lock; see import_apply.py.
             await session.commit()
