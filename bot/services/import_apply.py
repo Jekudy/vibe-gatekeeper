@@ -506,7 +506,29 @@ async def _apply_one_message(
     # 8. Governance gate. The synthetic row above is the audit trail. If the
     # imported content is offrecord, do NOT call persist_message_with_policy and
     # do NOT create chat_messages/message_versions rows.
-    policy, _mark_payload = detect_policy(text_value, caption_value)
+    #
+    # H1 fix: mirror message_persistence.py broadened-scan (Sprint #89 Commit 2).
+    # TD poll dict has a top-level "poll" key with "question". TD contact dict has
+    # "first_name" / "last_name" keys at the message level (contact messages).
+    _poll_dict = msg.get("poll") if kind == "poll" else None
+    poll_question: str | None = None
+    if isinstance(_poll_dict, dict):
+        _q = _poll_dict.get("question")
+        if isinstance(_q, str) and _q:
+            poll_question = _q
+    contact_name: str | None = None
+    if kind == "contact":
+        _first = msg.get("first_name")
+        _last = msg.get("last_name")
+        parts = [p for p in [_first, _last] if isinstance(p, str) and p]
+        if parts:
+            contact_name = " ".join(parts)
+    policy, _mark_payload = detect_policy(
+        text_value,
+        caption_value,
+        poll_question=poll_question,
+        contact_name=contact_name,
+    )
     if policy == "offrecord":
         raw_row.is_redacted = True
         raw_row.redaction_reason = "offrecord"
@@ -686,6 +708,26 @@ def _build_message_duck(
         kind_attrs[message_kind] = SimpleNamespace(_imported=True)
     if message_kind == "forward":
         kind_attrs["forward_origin"] = SimpleNamespace(_imported=True)
+
+    # H1 fix: supply poll.question and contact.first_name/last_name so that
+    # persist_message_with_policy's broadened detect_policy scan (Sprint #89)
+    # sees the same content as the step-8 governance gate above.
+    # TD poll dict is nested under msg["poll"]["question"].
+    # TD contact fields are at msg level: first_name / last_name.
+    if message_kind == "poll":
+        _poll_dict = msg.get("poll")
+        _poll_question: str | None = None
+        if isinstance(_poll_dict, dict):
+            _q = _poll_dict.get("question")
+            if isinstance(_q, str):
+                _poll_question = _q or None
+        kind_attrs["poll"] = SimpleNamespace(_imported=True, question=_poll_question)
+    if message_kind == "contact":
+        _first = msg.get("first_name") if isinstance(msg.get("first_name"), str) else None
+        _last = msg.get("last_name") if isinstance(msg.get("last_name"), str) else None
+        kind_attrs["contact"] = SimpleNamespace(
+            _imported=True, first_name=_first, last_name=_last
+        )
 
     return SimpleNamespace(
         message_id=msg_id,

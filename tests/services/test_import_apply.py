@@ -1038,3 +1038,93 @@ async def test_apply_resilient_to_bad_user_resolution(db_session) -> None:
         assert int(raw_7003.scalar_one()) == 0
     finally:
         tmp.unlink(missing_ok=True)
+
+
+# ─── H1: poll.question and contact.name passed to detect_policy in import path ──
+
+
+async def test_apply_poll_with_offrecord_question_yields_offrecord_policy(db_session) -> None:
+    """H1 fix verification: TD-imported poll whose question contains #offrecord MUST
+    result in memory_policy='offrecord' (or the row being redacted/skipped).
+
+    Before the fix, import_apply called detect_policy(text, caption) without
+    poll_question, so #offrecord in a poll question was silently stored as 'normal'.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    from bot.services.import_apply import run_apply
+
+    chat_id = -9901
+
+    poll_export = {
+        "name": "Poll Offrecord Chat",
+        "type": "private_supergroup",
+        "id": chat_id,
+        "messages": [
+            {
+                "id": 9901,
+                "type": "message",
+                "date": "2024-03-01T10:00:00",
+                "date_unixtime": "1709287200",
+                "from": "PollUser",
+                "from_id": "user9901001",
+                # poll kind: TD format uses top-level "poll" dict (no media_type for polls)
+                "poll": {
+                    "question": "Do you agree? #offrecord",
+                    "closed": False,
+                    "answers": ["Yes", "No"],
+                },
+            }
+        ],
+    }
+
+    tmp = _Path(__file__).parents[1] / "fixtures" / "td_export" / "_tmp_poll_offrecord.json"
+    tmp.write_text(_json.dumps(poll_export), encoding="utf-8")
+    try:
+        run_id = await _create_apply_run(
+            db_session,
+            source_path=str(tmp),
+            chat_id=chat_id,
+            source_hash="hash_poll_offrecord_h1",
+        )
+
+        await db_session.execute(
+            sa_text(
+                "INSERT INTO users (id, first_name, is_imported_only) "
+                "VALUES (9901001, 'PollUser', false) "
+                "ON CONFLICT (id) DO NOTHING"
+            )
+        )
+        await db_session.flush()
+
+        report = await run_apply(
+            db_session,
+            ingestion_run_id=run_id,
+            resume_point=None,
+            chunking_config=_default_chunking(),
+        )
+
+        # The poll with #offrecord question must be skipped via governance path.
+        assert report.skipped_governance_count == 1, (
+            f"H1: expected governance skip for poll with #offrecord question; "
+            f"got skipped_governance_count={report.skipped_governance_count}, "
+            f"applied_count={report.applied_count}"
+        )
+        assert report.applied_count == 0
+
+        # Verify no chat_messages row persisted with normal policy.
+        cm_row = await db_session.execute(
+            sa_text(
+                "SELECT memory_policy FROM chat_messages "
+                "WHERE chat_id = :cid AND message_id = 9901"
+            ),
+            {"cid": chat_id},
+        )
+        row = cm_row.fetchone()
+        assert row is None, (
+            f"H1: chat_messages row should not exist for offrecord poll; "
+            f"got memory_policy={row[0] if row else None}"
+        )
+    finally:
+        tmp.unlink(missing_ok=True)
