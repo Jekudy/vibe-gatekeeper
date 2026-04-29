@@ -76,13 +76,22 @@ The service performs all deletes and the audit insert in one database transactio
 
 1. count import-owned `chat_messages`
 2. count import-owned `message_versions`
-3. delete import-owned `chat_messages`
-4. let `message_versions` delete via `ON DELETE CASCADE`
-5. delete synthetic `telegram_updates`
+3. delete synthetic `telegram_updates` through the `deleted_updates` CTE
+4. delete import-owned `chat_messages` through the `deleted_messages` CTE
+5. let `message_versions` delete via `ON DELETE CASCADE`
 6. insert `ingestion_runs(run_type='rolled_back', status='completed', stats_json=...)`
 7. commit
 
 If any step fails, the transaction rolls back. Partial rollback is not allowed.
+
+**Why the CTE delete order works.** Both `deleted_updates` and `deleted_messages`
+evaluate against the same MVCC snapshot taken at statement start. When
+`deleted_updates` runs, the FK `chat_messages.raw_update_id -> telegram_updates.id`
+action (`SET NULL` or `CASCADE`, per the schema) modifies live tuples, but the
+second CTE's `WHERE` clause reads `chat_messages.raw_update_id` from the snapshot,
+which still matches the original `telegram_updates.id` set. Verified on PostgreSQL
+16. A future major-version change to CTE evaluation semantics would require
+revisiting this assumption.
 
 The delete + audit-insert section is protected by a nested transaction/SAVEPOINT. If the
 unique rollback-audit index fires after the pre-check missed a concurrent winner, the
