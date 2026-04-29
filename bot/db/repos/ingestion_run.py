@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.db.models import IngestionRun
 
 # Allowed run_type / status values mirror the CheckConstraint in the migration.
-_ALLOWED_RUN_TYPES = {"live", "import", "dry_run", "cancelled"}
+_ALLOWED_RUN_TYPES = {"live", "import", "dry_run", "cancelled", "rolled_back"}
 _TERMINAL_STATUSES = {"completed", "failed", "dry_run", "cancelled"}
 _ALLOWED_STATUSES = {"running"} | _TERMINAL_STATUSES
 

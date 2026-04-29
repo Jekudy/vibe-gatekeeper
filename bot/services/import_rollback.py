@@ -1,0 +1,324 @@
+"""Logical rollback for Telegram Desktop import runs (T2-NEW-G / issue #104).
+
+Rollback removes only rows owned by one import run. The ownership selector is the
+FK chain ``chat_messages.raw_update_id -> telegram_updates.id`` plus
+``telegram_updates.ingestion_run_id`` and the synthetic-update guard
+``telegram_updates.update_id IS NULL``.
+
+NO message text, captions, entities, or raw payload bodies are logged or returned.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+from sqlalchemy import text
+from sqlalchemy.engine import CursorResult
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
+
+from bot.services.import_chunking import acquire_advisory_lock
+
+logger = logging.getLogger(__name__)
+
+_IMPORT_RUN_TYPES = frozenset({"import"})
+
+
+class IngestionRunNotFoundError(ValueError):
+    """Raised when the requested ingestion_runs row does not exist."""
+
+
+class InvalidRollbackRunError(ValueError):
+    """Raised when the requested run is not an import-apply run."""
+
+
+class DownstreamDependentsError(ValueError):
+    """Raised when derived rows already depend on the import run."""
+
+
+@dataclass(frozen=True)
+class RollbackReport:
+    original_run_id: int
+    chat_messages_deleted: int
+    telegram_updates_deleted: int
+    message_versions_cascade_deleted: int
+    audit_run_id: int
+    idempotent_skip: bool
+
+
+async def rollback_ingestion_run(
+    session: AsyncSession,
+    ingestion_run_id: int,
+) -> RollbackReport:
+    """Rollback one import run by deleting its synthetic-update-owned rows.
+
+    The function commits on success and rolls back on any exception. Idempotency is
+    enforced under the per-run advisory lock by checking for an existing
+    ``run_type='rolled_back'`` audit row whose ``stats_json.original_run_id`` matches.
+    """
+    connection = await session.connection()
+
+    try:
+        original = await _load_original_run(connection, ingestion_run_id)
+        _validate_original_run(original)
+    except BaseException:
+        await session.rollback()
+        raise
+
+    async with acquire_advisory_lock(connection, ingestion_run_id):
+        try:
+            existing_audit_id = await _find_existing_rollback_audit(
+                connection,
+                ingestion_run_id,
+            )
+            if existing_audit_id is not None:
+                await session.commit()
+                logger.info(
+                    "import_rollback: idempotent no-op",
+                    extra={
+                        "original_run_id": ingestion_run_id,
+                        "audit_run_id": existing_audit_id,
+                    },
+                )
+                return RollbackReport(
+                    original_run_id=ingestion_run_id,
+                    chat_messages_deleted=0,
+                    telegram_updates_deleted=0,
+                    message_versions_cascade_deleted=0,
+                    audit_run_id=existing_audit_id,
+                    idempotent_skip=True,
+                )
+
+            await _check_no_downstream_dependents(connection, ingestion_run_id)
+
+            chat_messages_count = await _count_import_chat_messages(
+                connection,
+                ingestion_run_id,
+            )
+            message_versions_count = await _count_import_message_versions(
+                connection,
+                ingestion_run_id,
+            )
+
+            chat_delete_result = await connection.execute(
+                text(
+                    """
+                    DELETE FROM chat_messages cm
+                     WHERE EXISTS (
+                           SELECT 1
+                             FROM telegram_updates tu
+                            WHERE tu.id = cm.raw_update_id
+                              AND tu.ingestion_run_id = :id
+                              AND tu.update_id IS NULL
+                     )
+                    """
+                ),
+                {"id": ingestion_run_id},
+            )
+            chat_messages_deleted = _require_rowcount(chat_delete_result)
+
+            update_delete_result = await connection.execute(
+                text(
+                    """
+                    DELETE FROM telegram_updates
+                     WHERE ingestion_run_id = :id
+                       AND update_id IS NULL
+                    """
+                ),
+                {"id": ingestion_run_id},
+            )
+            telegram_updates_deleted = _require_rowcount(update_delete_result)
+
+            audit_run_id = await _insert_rollback_audit(
+                connection,
+                original_run_id=ingestion_run_id,
+                chat_messages_deleted=chat_messages_deleted,
+                telegram_updates_deleted=telegram_updates_deleted,
+                message_versions_cascade_deleted=message_versions_count,
+            )
+
+            await session.commit()
+        except BaseException:
+            await session.rollback()
+            raise
+
+    logger.info(
+        "import_rollback: completed",
+        extra={
+            "original_run_id": ingestion_run_id,
+            "audit_run_id": audit_run_id,
+            "chat_messages_deleted": chat_messages_deleted,
+            "telegram_updates_deleted": telegram_updates_deleted,
+            "message_versions_cascade_deleted": message_versions_count,
+            "chat_messages_count_before_delete": chat_messages_count,
+        },
+    )
+
+    return RollbackReport(
+        original_run_id=ingestion_run_id,
+        chat_messages_deleted=chat_messages_deleted,
+        telegram_updates_deleted=telegram_updates_deleted,
+        message_versions_cascade_deleted=message_versions_count,
+        audit_run_id=audit_run_id,
+        idempotent_skip=False,
+    )
+
+
+async def _check_no_downstream_dependents(
+    connection: AsyncConnection,
+    ingestion_run_id: int,
+) -> None:
+    """Placeholder for Phase 4+ derived-row protection.
+
+    TODO(Phase 4): check extracted facts, search rows, evidence bundles, cards,
+    summaries, graph sync rows, and other derived layers before allowing rollback.
+    """
+    _ = connection
+    _ = ingestion_run_id
+
+
+async def _load_original_run(
+    connection: AsyncConnection,
+    ingestion_run_id: int,
+) -> dict:
+    result = await connection.execute(
+        text(
+            """
+            SELECT id, run_type, status
+              FROM ingestion_runs
+             WHERE id = :id
+             LIMIT 1
+            """
+        ),
+        {"id": ingestion_run_id},
+    )
+    row = result.mappings().first()
+    if row is None:
+        raise IngestionRunNotFoundError("ingestion_run not found")
+    return dict(row)
+
+
+def _validate_original_run(run: dict) -> None:
+    run_type = run["run_type"]
+    if run_type not in _IMPORT_RUN_TYPES:
+        raise InvalidRollbackRunError(
+            f"ingestion_run {run['id']} has run_type={run_type!r}; "
+            "rollback_ingestion_run accepts only import runs"
+        )
+
+
+async def _find_existing_rollback_audit(
+    connection: AsyncConnection,
+    ingestion_run_id: int,
+) -> int | None:
+    result = await connection.execute(
+        text(
+            """
+            SELECT id
+              FROM ingestion_runs
+             WHERE run_type = 'rolled_back'
+               AND stats_json::jsonb ->> 'original_run_id' = :original_run_id
+             ORDER BY id ASC
+             LIMIT 1
+            """
+        ),
+        {"original_run_id": str(ingestion_run_id)},
+    )
+    value = result.scalar_one_or_none()
+    return int(value) if value is not None else None
+
+
+async def _count_import_chat_messages(
+    connection: AsyncConnection,
+    ingestion_run_id: int,
+) -> int:
+    result = await connection.execute(
+        text(
+            """
+            SELECT COUNT(*)
+              FROM chat_messages cm
+              JOIN telegram_updates tu ON tu.id = cm.raw_update_id
+             WHERE tu.ingestion_run_id = :id
+               AND tu.update_id IS NULL
+            """
+        ),
+        {"id": ingestion_run_id},
+    )
+    return int(result.scalar_one())
+
+
+async def _count_import_message_versions(
+    connection: AsyncConnection,
+    ingestion_run_id: int,
+) -> int:
+    result = await connection.execute(
+        text(
+            """
+            SELECT COUNT(*)
+              FROM message_versions mv
+              JOIN chat_messages cm ON cm.id = mv.chat_message_id
+              JOIN telegram_updates tu ON tu.id = cm.raw_update_id
+             WHERE tu.ingestion_run_id = :id
+               AND tu.update_id IS NULL
+            """
+        ),
+        {"id": ingestion_run_id},
+    )
+    return int(result.scalar_one())
+
+
+async def _insert_rollback_audit(
+    connection: AsyncConnection,
+    *,
+    original_run_id: int,
+    chat_messages_deleted: int,
+    telegram_updates_deleted: int,
+    message_versions_cascade_deleted: int,
+) -> int:
+    now = datetime.now(tz=timezone.utc)
+    stats = {
+        "original_run_id": original_run_id,
+        "chat_messages_deleted": chat_messages_deleted,
+        "telegram_updates_deleted": telegram_updates_deleted,
+        "message_versions_cascade_deleted": message_versions_cascade_deleted,
+        "rolled_back_at": now.isoformat(),
+    }
+    result = await connection.execute(
+        text(
+            """
+            INSERT INTO ingestion_runs (
+                run_type,
+                source_name,
+                status,
+                stats_json,
+                started_at,
+                finished_at
+            )
+            VALUES (
+                'rolled_back',
+                :source_name,
+                'completed',
+                CAST(:stats_json AS JSONB),
+                :started_at,
+                :finished_at
+            )
+            RETURNING id
+            """
+        ),
+        {
+            "source_name": f"rollback:{original_run_id}",
+            "stats_json": json.dumps(stats),
+            "started_at": now,
+            "finished_at": now,
+        },
+    )
+    return int(result.scalar_one())
+
+
+def _require_rowcount(result: CursorResult) -> int:
+    rowcount = result.rowcount
+    if rowcount is None or rowcount < 0:
+        raise RuntimeError("database did not report rollback delete rowcount")
+    return int(rowcount)

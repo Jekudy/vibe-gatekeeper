@@ -5,6 +5,7 @@ Currently supported subcommands:
     import_apply <export_path> [--resume] [--chunk-size N]
                                   — apply a Telegram Desktop export to the DB
                                     (checkpoint/resume infrastructure ready; apply logic in #103)
+    rollback_ingestion_run <id>   — logically rollback one import run by ingestion_run_id
 """
 
 from __future__ import annotations
@@ -116,6 +117,11 @@ async def _cmd_import_dry_run_with_db(args: argparse.Namespace) -> int:
 def _cmd_import_apply(args: argparse.Namespace) -> int:
     """Synchronous entry-point that delegates to the async implementation."""
     return asyncio.run(_cmd_import_apply_async(args))
+
+
+def _cmd_rollback_ingestion_run(args: argparse.Namespace) -> int:
+    """Synchronous entry-point for logical import rollback."""
+    return asyncio.run(_cmd_rollback_ingestion_run_async(args))
 
 
 async def _cmd_import_apply_async(args: argparse.Namespace) -> int:
@@ -269,6 +275,38 @@ async def _cmd_import_apply_async(args: argparse.Namespace) -> int:
             f"chunks={report.chunks_processed}"
         )
 
+    return 0
+
+
+async def _cmd_rollback_ingestion_run_async(args: argparse.Namespace) -> int:
+    from bot.services.import_rollback import (
+        DownstreamDependentsError,
+        IngestionRunNotFoundError,
+        InvalidRollbackRunError,
+        rollback_ingestion_run,
+    )
+
+    import bot.db.engine as _db_engine
+
+    try:
+        async with _db_engine.async_session() as session:
+            report = await rollback_ingestion_run(session, args.ingestion_run_id)
+    except InvalidRollbackRunError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    except IngestionRunNotFoundError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 3
+    except DownstreamDependentsError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 4
+
+    suffix = " (idempotent no-op)" if report.idempotent_skip else ""
+    print(f"rollback_ingestion_run {report.original_run_id}{suffix}")
+    print(f"chat_messages_deleted: {report.chat_messages_deleted}")
+    print(f"telegram_updates_deleted: {report.telegram_updates_deleted}")
+    print(f"message_versions_cascade_deleted: {report.message_versions_cascade_deleted}")
+    print(f"audit_run_id: {report.audit_run_id}")
     return 0
 
 
@@ -443,6 +481,14 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     p_apply.set_defaults(func=_cmd_import_apply)
+
+    # rollback_ingestion_run subcommand
+    p_rollback = sub.add_parser(
+        "rollback_ingestion_run",
+        help="Logically rollback one import run by ingestion_run_id.",
+    )
+    p_rollback.add_argument("ingestion_run_id", type=int)
+    p_rollback.set_defaults(func=_cmd_rollback_ingestion_run)
 
     args = parser.parse_args(argv)
     return args.func(args)
