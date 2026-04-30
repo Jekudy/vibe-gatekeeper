@@ -17,6 +17,7 @@ from bot.handlers import (
     forget_reply,
     forward_lookup,
     questionnaire,
+    qa,
     start,
     vouch,
 )
@@ -111,6 +112,7 @@ async def main() -> None:
         edited_message.router,  # T1-14: edited_message handler (before chat_messages catch-all)
         forget_me.router,  # T3-03: /forget_me command (DM or in-chat)
         forget_reply.router,   # T3-02: /forget command handler (before chat_messages catch-all)
+        qa.router,  # T4-04: /recall q&a handler, runtime-gated by memory.qa.enabled
         forward_lookup.router,
         chat_messages.router,  # lowest priority — catches all group messages
     )
