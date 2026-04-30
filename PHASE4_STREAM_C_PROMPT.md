@@ -61,32 +61,27 @@ Same as other streams: re-read files before quoting; treat memory recall as hypo
 
 ## 4. Implementation Plan
 
-### Step 4.1 — Search shape stub (optional, only if Stream B not yet shipping)
+### Step 4.1 — Reality check: SearchHit is already canonical
 
-If Stream B has not landed `SearchHit` yet, create `bot/services/search_types.py`:
+PR #151 (merged) shipped `bot/services/search.py::SearchHit` as the canonical shape — but with **6 fields, not the planned 9**:
 
 ```python
-from __future__ import annotations
-from dataclasses import dataclass
-from datetime import datetime
-
-
+# What ships TODAY in bot/services/search.py:
 @dataclass(frozen=True)
 class SearchHit:
     message_version_id: int
-    chat_message_id: int
     chat_id: int
     message_id: int
-    user_id: int | None
     snippet: str
     ts_rank: float
     captured_at: datetime
-    message_date: datetime
 ```
 
-Stream B's PR can later move this canonical shape into `bot/services/search.py` and re-export from `search_types.py` for backwards compatibility.
+The `EvidenceItem` design in this prompt assumes the planned 9-field shape (also includes `chat_message_id`, `user_id`, `message_date`). Stream D needs `user_id` (for author rendering) and `message_date` (for date display) — without them, `/recall` cannot produce useful citations.
 
-If Stream B has already merged, import from `bot/services/search.py` directly.
+**Resolution:** there is a hardening follow-up issue (label `phase:4`, search "T4-02 hardening" / "SearchHit expansion") that expands `SearchHit` to the planned 9 fields and adds the `current_version_id = mv.id` JOIN clause Stream B's PR omitted. Coordinate so Stream C's PR lands AFTER the hardening PR. If urgent, downgrade `EvidenceItem` to 6 fields and accept that Stream D will need a per-item DB lookup to fetch `user_id` + `message_date` from `chat_messages` — surface the trade-off in your PR description.
+
+Do NOT create `bot/services/search_types.py` — the canonical shape is in `bot/services/search.py`.
 
 ### Step 4.2 — `bot/services/evidence.py`
 
@@ -98,11 +93,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Sequence
 
-# Forward-compatible import:
-try:
-    from bot.services.search import SearchHit  # type: ignore
-except ImportError:
-    from bot.services.search_types import SearchHit  # type: ignore
+from bot.services.search import SearchHit  # canonical shape (PR #151)
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,10 +184,7 @@ from pathlib import Path
 import pytest
 
 from bot.services.evidence import EvidenceBundle, EvidenceItem
-try:
-    from bot.services.search import SearchHit
-except ImportError:
-    from bot.services.search_types import SearchHit
+from bot.services.search import SearchHit
 
 
 def _make_hit(idx: int) -> SearchHit:
@@ -319,7 +307,6 @@ All green. No external services touched.
 
 ```bash
 git add bot/services/evidence.py \
-        bot/services/search_types.py \
         tests/services/test_evidence.py \
         tests/fixtures/evidence_bundle_v1.json
 git commit -m "feat(p4-C): evidence bundle frozen contract (T4-03, #147)"
@@ -371,5 +358,5 @@ After merge:
 - PR URL + merge SHA.
 - Issue #147 closed.
 - Files changed (3-4 expected).
-- Decision on `search_types.py` stub vs direct import.
+- Decision on EvidenceItem field count (9-field vs 6-field SearchHit) — see §4.1.
 - Confirm "no LLM imports".

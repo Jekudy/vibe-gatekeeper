@@ -1,11 +1,41 @@
 # Phase 4 — Hybrid Search + Q&A with Citations: Design & Stream Plan
 
-**Status:** Planning — design ratified, tickets created, streams allocated
+**Status:** **In progress** — Wave 1 partially shipped via PR #151 (T4-01 + T4-02 merged with deviations); audit + corrections issued via PR following commit 5bd4888.
 **Cycle:** Memory system Phase 4
 **Date:** 2026-04-30
 **Predecessor:** Phase 2 CLOSED 2026-04-29 (20/20 issues + FHR), Phase 3 governance skeleton merged in Phase 2 wave Charlie
-**Migration window:** 020+
+**Migration window:** 020+ (020 shipped in PR #151)
 **Critical invariant for this phase:** No LLM calls in Phase 4. Pure FTS retrieval + evidence + citations + abstention. LLM generation is **Phase 5**.
+
+---
+
+## 0. Implementation Status (post PR #151 audit)
+
+PR #151 (`feat/p4-fts-infra`, merged 2026-04-30) delivered T4-01 and T4-02 in parallel with this plan, with **5 material deviations** documented below. Hardening follow-up issue tracks the gap.
+
+| Component | Plan §5 ref | Shipped? | Outstanding |
+|---|---|---|---|
+| FTS schema migration | §5.A | ✅ PR #151 (deviations: column `tsv` not `search_tsv`; index `idx_message_versions_tsv` not `ix_*_search_tsv`; source `text` not `normalized_text`; partial index `WHERE is_redacted=false` despite plan rejection) | `MessageVersion.tsv` ORM column not added; rename + source switch up for hardening discussion |
+| Search service | §5.B | ⚠️ PR #151 (functional but: `SearchHit` has 6 of 9 planned fields; `current_version_id = mv.id` JOIN missing → returns historical versions; tombstone NOT EXISTS uses single `target_type='message'` key, missing `message_hash`/`user`/`export` formats — invariant #9 weakened) | Hardening required (separate issue) |
+| Cascade `fts_rows` layer | §5.A item 5 + §5.B | ➖ Skipped status retained, but de-facto correctness preserved by existing `_cascade_message_versions` nulling `text/caption/normalized_text` (which makes generated `tsv` column auto-recompute to empty) | Status accounting cleanup recommended; not blocking |
+| Tests for T4-02 | §5.B | ⚠️ 14 of planned 9-test core landed; **missing**: russian stemmer test (`лошадь`/`лошади`), injection safety, current_version_id filter, 100-row pagination | Hardening |
+| Evidence bundle | §5.C | 🟡 Stream C (issue #147) not yet started | Wave 1 parallel — unblocked |
+| Q&A handler `/recall` | §5.D | 🟡 Stream D (issue #148) not yet started | Wave 3 — depends on Stream C + Stream E + hardening (for SearchHit fields) |
+| `qa_traces` table | §5.E | 🟡 Stream E (issue #149) not yet started | Wave 1 parallel; cascade `qa_traces` layer wiring deferred (xfail in tests until added) |
+| Eval seed cases | §5.D T4-06 | 🟡 Issue #150 not started | Inside Stream D PR |
+
+### Verbatim deviations from plan (for ratification)
+
+1. **Column name** — shipped: `message_versions.tsv`; planned: `search_tsv`. Downstream code (Stream B, C, D) must reference `tsv`.
+2. **Index name** — shipped: `idx_message_versions_tsv`; planned: `ix_message_versions_search_tsv`. Cosmetic.
+3. **tsvector source** — shipped: `to_tsvector('russian', coalesce(text,'') || ' ' || coalesce(caption,''))`; planned: `coalesce(normalized_text,'') || ' ' || coalesce(caption,'')`. Plan §5.A item 2 explicitly required `normalized_text`. **Material:** `text` is raw user input including markup/whitespace artifacts; `normalized_text` is the canonical surface. Hardening should switch the source.
+4. **Partial index** — shipped: GIN index with `postgresql_where=is_redacted=FALSE`; planned: full index, query-time filter only (§5.A item 5 explicitly rejected partial index). Material: forget cascade still works because cascade nulls `text/caption/normalized_text` AND sets `is_redacted=true`, so partial index excludes redacted rows correctly. Operational note: if `is_redacted` is updated frequently, partial index may churn. Acceptable as-is.
+5. **Tombstone exclusion key set** — shipped: `target_type='message'` + `target_id::int = c.id`; planned: three-key NOT EXISTS over `message:`, `message_hash:`, `user:` formats. **Material — invariant #9 weakened.** Forget events targeting `message_hash` or `user` (e.g., `/forget_me`, hash-collision deletion) do NOT exclude content from search results until each affected `chat_messages` row also has its own `message:`-keyed forget_event row. Hardening MUST add the three-key clause.
+
+### Outstanding work tracked
+
+- **T4-02 hardening — [#153](https://github.com/Jekudy/vibeshkoder/issues/153)** — SearchHit field expansion (6→9), `current_version_id` JOIN, three-key tombstone NOT EXISTS, russian stemmer + injection tests, optional partial-index review, `MessageVersion.tsv` ORM column.
+- **Cascade `qa_traces` layer (deferred)** — extend `bot/services/forget_cascade.py::CASCADE_LAYER_ORDER` with `qa_traces` and add `_cascade_qa_traces` to null `query_text` + set `query_redacted=true` for forget events with `target_type='user'`. Stream E xfail test will flip to passing once landed.
 
 ---
 
@@ -518,14 +548,15 @@ Wave 3 (solo):      D
 
 All tickets land as GitHub issues with label `phase:4`. Issue numbers populated after `gh issue create`.
 
-| ID | Title | Stream | Size | Deps | GitHub # |
-|---|---|---|---|---|---|
-| **T4-01** | FTS schema: tsvector generated column + GIN index on `message_versions` | A | M | — | [#145](https://github.com/Jekudy/vibeshkoder/issues/145) |
-| **T4-02** | Search service: `bot/services/search.py` with governance + tombstone filtering | B | L | T4-01, T4-03, T4-05 | [#146](https://github.com/Jekudy/vibeshkoder/issues/146) |
-| **T4-03** | Evidence bundle: frozen `EvidenceBundle`/`EvidenceItem` dataclasses + JSON contract | C | S | — | [#147](https://github.com/Jekudy/vibeshkoder/issues/147) |
-| **T4-04** | Q&A handler: `/recall` command + `memory.qa.enabled` feature flag (default OFF) | D | M | T4-02, T4-03, T4-05 | [#148](https://github.com/Jekudy/vibeshkoder/issues/148) |
-| **T4-05** | qa_traces audit table + repo (`bot/db/repos/qa_trace.py`) | E | S | — | [#149](https://github.com/Jekudy/vibeshkoder/issues/149) |
-| **T4-06** | Eval seed cases: ≥ 10 fixture cases for /recall correctness (rolled into Stream D) | D | S | T4-02, T4-04 | [#150](https://github.com/Jekudy/vibeshkoder/issues/150) |
+| ID | Title | Stream | Size | Deps | GitHub # | Status |
+|---|---|---|---|---|---|---|
+| **T4-01** | FTS schema: tsvector generated column + GIN index on `message_versions` | A | M | — | [#145](https://github.com/Jekudy/vibeshkoder/issues/145) | ✅ shipped via PR #151 (with deviations — see §0) |
+| **T4-02** | Search service: `bot/services/search.py` with governance + tombstone filtering | B | L | T4-01, T4-03, T4-05 | [#146](https://github.com/Jekudy/vibeshkoder/issues/146) | ⚠️ shipped via PR #151 (with deviations — hardening tracked in [#153](https://github.com/Jekudy/vibeshkoder/issues/153)) |
+| **T4-02H** | Hardening: SearchHit fields + current_version_id JOIN + 3-key tombstone + tests | B | M | T4-02 | [#153](https://github.com/Jekudy/vibeshkoder/issues/153) | 🟡 not started |
+| **T4-03** | Evidence bundle: frozen `EvidenceBundle`/`EvidenceItem` dataclasses + JSON contract | C | S | — | [#147](https://github.com/Jekudy/vibeshkoder/issues/147) | 🟡 not started |
+| **T4-04** | Q&A handler: `/recall` command + `memory.qa.enabled` feature flag (default OFF) | D | M | T4-02, T4-03, T4-05 (+ hardening) | [#148](https://github.com/Jekudy/vibeshkoder/issues/148) | 🟡 not started |
+| **T4-05** | qa_traces audit table + repo (`bot/db/repos/qa_trace.py`) | E | S | — | [#149](https://github.com/Jekudy/vibeshkoder/issues/149) | 🟡 not started |
+| **T4-06** | Eval seed cases: ≥ 10 fixture cases for /recall correctness (rolled into Stream D) | D | S | T4-02, T4-04 | [#150](https://github.com/Jekudy/vibeshkoder/issues/150) | 🟡 not started |
 
 ### T4-01 acceptance (testable)
 

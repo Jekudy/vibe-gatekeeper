@@ -19,7 +19,7 @@ cd .worktrees/p4-stream-e
 
 Verify: `git branch --show-current` is `feat/p4-stream-e-qa-traces`. Latest commit equals `origin/main`.
 
-**Migration ordering:** your migration is 021. Stream A's is 020. If Stream A has not yet merged when you push, your PR can still pass CI (CI applies all migrations sequentially), but you MUST hold the merge until Stream A is on `origin/main`. Rebase if needed.
+**Migration ordering:** your migration is 021. Stream A's migration 020 **already shipped via PR #151** with revision id literal `"020"` (file `alembic/versions/020_add_message_versions_fts.py`). Your `down_revision` MUST be the literal string `"020"`, NOT `"020_add_message_version_fts_index"` as earlier-draft text in this prompt suggested.
 
 ---
 
@@ -77,7 +77,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = "021_add_qa_traces"
-down_revision = "020_add_message_version_fts_index"
+down_revision = "020"  # literal — that's the actual revision id of PR #151's migration
 branch_labels = None
 depends_on = None
 
@@ -116,7 +116,7 @@ def downgrade() -> None:
     op.drop_table("qa_traces")
 ```
 
-**If Stream A's migration 020 has not merged when you author:** set `down_revision = "019_add_ingestion_runs_rolled_back"` temporarily, then rebase to point at `"020_add_message_version_fts_index"` once Stream A merges. Coordinate via PR comment.
+**Note:** PR #151 already merged migration 020. Use `down_revision = "020"` directly. The earlier-draft fallback to 019 is no longer relevant.
 
 ### Step 4.2 — Model `bot/db/models.py`
 
@@ -245,9 +245,22 @@ async def test_evidence_ids_jsonb_round_trip(session):
     assert fetched.evidence_ids == ids
 
 
-@pytest.mark.xfail(reason="cascade wiring lives in Stream B / T4-02; flip to passing once #146 merges")
+@pytest.mark.xfail(
+    reason=(
+        "qa_traces cascade layer not yet wired into bot/services/forget_cascade.py "
+        "CASCADE_LAYER_ORDER. Tracked in T4-02 hardening follow-up. Flip to passing "
+        "once the cascade adds a `qa_traces` layer that nulls query_text + sets "
+        "query_redacted=true for forget_events with target_type='user'."
+    )
+)
 @pytest.mark.asyncio
 async def test_forget_me_cascade_redacts_query(session):
+    """Drives the existing event-driven cascade worker (no `process_forget_for_user`
+    direct API exists). Inserts a forget_event(target_type='user') and calls the
+    real worker — same path that /forget_me triggers."""
+    from bot.db.models import ForgetEvent
+    from bot.services.forget_cascade import run_cascade_worker_once
+
     trace = await QaTraceRepo.create(
         session,
         user_tg_id=42,
@@ -257,10 +270,19 @@ async def test_forget_me_cascade_redacts_query(session):
         abstained=False,
         redact_query=False,
     )
+    # Insert the forget event the same way /forget_me handler would:
+    fe = ForgetEvent(
+        target_type="user",
+        target_id="42",
+        tombstone_key="user:42",
+        authorized_by="self",
+        policy="forgotten",
+        status="pending",
+    )
+    session.add(fe)
     await session.flush()
-    # Simulate /forget_me cascade for user 42:
-    from bot.services.forget_cascade import process_forget_for_user  # noqa
-    await process_forget_for_user(session, user_tg_id=42)
+    # Drive the existing worker (event-driven; does NOT take user_tg_id directly):
+    await run_cascade_worker_once(session)
     refetch = await session.get(type(trace), trace.id)
     assert refetch.query_text is None
     assert refetch.query_redacted is True
@@ -303,7 +325,7 @@ PR body:
 - Paste pytest output.
 - Note: cascade wiring is Stream B (T4-02 / #146); the 4th test is xfail until then.
 - Confirm: no LLM imports.
-- Migration ordering: `down_revision = "020_add_message_version_fts_index"` (after Stream A merged) OR `"019_add_ingestion_runs_rolled_back"` if author-time Stream A unmerged (rebase later).
+- Migration ordering: `down_revision = "020"` (literal — PR #151 already shipped 020).
 
 Unified review:
 1. Claude product reviewer (background) — focus: schema correctness, redaction semantics.
