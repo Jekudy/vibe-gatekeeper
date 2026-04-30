@@ -37,12 +37,12 @@ Verify: `git branch --show-current` is `feat/p4-stream-d-qa-handler`. Latest `or
 5. `docs/memory-system/AUTHORIZED_SCOPE.md`.
 6. `docs/memory-system/PHASE4_PLAN.md` §5.D — your component spec.
 7. `bot/handlers/chat_messages.py` — handler pattern (advisory lock, governance, repos, no LLM).
-8. `bot/services/feature_flag.py` (or wherever `is_enabled` lives) — flag check pattern.
-9. `bot/services/governance.py` — `detect_policy(...)` signature; you call it on the user's QUERY.
+8. `bot/db/repos/feature_flag.py` — flag check pattern. **Real API:** `await FeatureFlagRepo.get(session, "memory.qa.enabled") -> bool`. There is NO `bot/services/feature_flag.py`.
+9. `bot/services/governance.py` — `detect_policy(...)` returns `tuple[PolicyOutcome, dict | None]`, NOT a string. Always unpack the tuple.
 10. `bot/services/search.py` (Stream B) — `search_messages(...)` API.
 11. `bot/services/evidence.py` (Stream C) — `EvidenceBundle.from_hits(...)`.
 12. `bot/db/repos/qa_trace.py` (Stream E) — `QaTraceRepo.create(...)`.
-13. `bot/db/repos/user.py` — for member/admin lookup if not already done in middleware.
+13. `bot/db/repos/user.py` — for member/admin lookup. **Real API:** `UserRepo.get(session, telegram_id)` and `UserRepo.get_by_tg_id(session, tg_id)`. There is NO `UserRepo.get_by_id`.
 14. `bot/__main__.py` — router registration pattern.
 15. `tests/handlers/` — existing test structure for handlers.
 
@@ -69,7 +69,11 @@ For Stream D specifically:
 
 Same as other streams: re-read files, treat memory recall as hypothesis, verify with Grep.
 
-Specifically: before assuming a helper exists (`is_member_or_admin`, `feature_flag.is_enabled`, deep-link formatting), `Grep -n` for the function name across `bot/`. Hallucinated helpers waste a review cycle.
+Specifically: before assuming a helper exists, `Grep -n` for the function name across `bot/`. Hallucinated helpers waste a review cycle. **Verified-real APIs (use these, do NOT invent variants):**
+- Feature flag: `from bot.db.repos.feature_flag import FeatureFlagRepo` → `await FeatureFlagRepo.get(session, "memory.qa.enabled")` returns `bool`.
+- User lookup: `from bot.db.repos.user import UserRepo` → `await UserRepo.get(session, telegram_id)` or `await UserRepo.get_by_tg_id(session, tg_id)`.
+- Governance: `from bot.services.governance import detect_policy` → returns `tuple[PolicyOutcome, dict | None]`. Unpack: `policy, _payload = detect_policy(...)`.
+- Cascade: forget cascade is event-driven via `forget_events` rows + `run_cascade_worker_once(session, ...)` (`bot/services/forget_cascade.py:329`). There is NO direct `process_forget_for_user` function.
 
 ---
 
@@ -111,15 +115,17 @@ async def run_qa(
 ```python
 from __future__ import annotations
 
+import html
+
 from aiogram import Router
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
+from bot.db.repos.feature_flag import FeatureFlagRepo  # NOT bot.services.feature_flag
 from bot.db.repos.qa_trace import QaTraceRepo
 from bot.db.repos.user import UserRepo
-from bot.services.feature_flag import is_enabled
 from bot.services.governance import detect_policy
 from bot.services.qa import run_qa
 
@@ -133,24 +139,32 @@ def _short_chat_id(chat_id: int) -> str:
 
 
 def _format_response(bundle, users_by_id: dict[int, "User"]) -> str:
+    """HTML-formatted response. ts_headline returns <b>...</b> tags natively, so HTML mode is the safest choice (Markdown would require escaping every _, *, [, ] in user content)."""
     if bundle.abstained:
         return "Не нашёл подходящих свидетельств в истории чата."
-    parts = ["**Найденные свидетельства:**\n"]
+    parts = ["<b>Найденные свидетельства:</b>\n"]
     short = _short_chat_id(bundle.chat_id)
     for item in bundle.items:
         author = users_by_id.get(item.user_id, None)
-        author_name = author.first_name if author else "—"
+        author_name = html.escape(author.first_name) if author else "—"
         date = item.message_date.strftime("%Y-%m-%d %H:%M")
-        snippet = item.snippet.replace("<b>", "**").replace("</b>", "**")
+        # ts_headline already emits <b>...</b>; do NOT escape the snippet body
+        # (the search service guarantees it is safe HTML — only <b> tags are added).
+        snippet = item.snippet
         link = f"https://t.me/c/{short}/{item.message_id}"
-        parts.append(f"> {snippet}\n> — _{author_name}, {date}_ · [→]({link})\n")
+        parts.append(
+            f"<blockquote>{snippet}</blockquote>\n"
+            f"<i>— {author_name}, {date}</i> · <a href=\"{link}\">→</a>\n"
+        )
     return "\n".join(parts)
 
 
 @router.message(Command("recall"))
-async def recall_handler(message: Message, session: AsyncSession) -> None:
+async def recall_handler(
+    message: Message, command: CommandObject, session: AsyncSession
+) -> None:
     # 1. Feature flag — silent return on OFF
-    if not await is_enabled(session, "memory.qa.enabled"):
+    if not await FeatureFlagRepo.get(session, "memory.qa.enabled"):
         return
 
     # 2. Authz: only in COMMUNITY_CHAT_ID group
@@ -162,20 +176,20 @@ async def recall_handler(message: Message, session: AsyncSession) -> None:
     # 3. Authz: member or admin
     if message.from_user is None:
         return
-    user = await UserRepo.get_by_id(session, message.from_user.id)
+    user = await UserRepo.get(session, message.from_user.id)
     if user is None or not (user.is_member or user.is_admin):
         await message.reply("Доступ только участникам сообщества.")
         return
 
-    # 4. Parse query
-    text_payload = message.text or ""
-    query = text_payload.removeprefix("/recall").strip()
+    # 4. Parse query — use aiogram's CommandObject.args (None or the post-command tail).
+    # Avoid str.removeprefix("/recall") because it would also match "/recallstuff".
+    query = (command.args or "").strip()
     if not query:
-        await message.reply("Использование: `/recall <вопрос>`", parse_mode="Markdown")
+        await message.reply("Использование: <code>/recall &lt;вопрос&gt;</code>", parse_mode="HTML")
         return
 
-    # 5. Governance on the QUERY
-    policy = detect_policy(text=query, caption=None)
+    # 5. Governance on the QUERY — detect_policy returns (PolicyOutcome, dict|None).
+    policy, _payload = detect_policy(text=query, caption=None)
     redact_query = policy != "normal"
 
     # 6. Run search + bundle
@@ -186,15 +200,15 @@ async def recall_handler(message: Message, session: AsyncSession) -> None:
         redact_query_in_audit=redact_query,
     )
 
-    # 7. Render response (NEVER echo query if redact_query)
+    # 7. Render response (NEVER echo query if redact_query — abstention/format handles this naturally)
     users_by_id: dict[int, "User"] = {}
     for item in result.bundle.items:
         if item.user_id and item.user_id not in users_by_id:
-            u = await UserRepo.get_by_id(session, item.user_id)
+            u = await UserRepo.get(session, item.user_id)
             if u:
                 users_by_id[item.user_id] = u
     response = _format_response(result.bundle, users_by_id)
-    await message.reply(response, parse_mode="Markdown", disable_web_page_preview=True)
+    await message.reply(response, parse_mode="HTML", disable_web_page_preview=True)
 
     # 8. Audit
     await QaTraceRepo.create(
