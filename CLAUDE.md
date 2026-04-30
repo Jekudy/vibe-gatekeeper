@@ -39,18 +39,34 @@ Phase 1 closed 2026-04-27. Phase 2 (importer + governance skeleton) **CLOSED 202
 Final Holistic Review hotfix (PR #143). Phase 3 governance skeleton (T3-01..T3-05) merged
 as part of Phase 2 wave.
 
-**Phase 4 (hybrid search + Q&A with citations) CLOSED 2026-04-30** — 6/6 implementation
+**Phase 4 (hybrid search + Q&A with citations) IMPLEMENTATION MERGED 2026-04-30** — 6/6
 tickets merged: T4-01/T4-02 via PRs #151 + #156 (FTS schema + search service + hardening),
 T4-03 via #157 (evidence bundle), T4-04 via #162 (/recall handler), T4-05 via #158
 (qa_traces audit), T4-06 via #162 (12 eval cases). T4-02H (#153) closed as duplicate of
 #156. Forward-looking design drafts for Phase 5/6/7/8/9/10/11/12 ratified as docs-only
-artifacts in `docs/memory-system/prompts/` (PRs #159 + #160). FHR in flight.
+artifacts in `docs/memory-system/prompts/` (PRs #159 + #160).
 
-**Next active phase: Phase 5 (LLM gateway + answer synthesis)** — design ratified per
-`docs/memory-system/prompts/PHASE5_PLAN_DRAFT.md`, awaiting AUTHORIZED_SCOPE.md update
-before implementation kickoff. Open known follow-ups: qa_traces cascade layer wiring
-(deferred from Stream E xfail), Phase 11 numbering conflict (HANDOFF = Shkoderbench/evals
-vs draft = expertise pages).
+**⚠️ Phase 4 NOT PRODUCTION-READY** — FHR (Codex deep-spec-reviewer) found 3 CRITICAL
+gaps blocking `memory.qa.enabled=true` rollout. Tracked in **issue #164** (P4-CLOSE-HOTFIX):
+1. `bot/services/message_persistence.py:16` — live save path does NOT create v1
+   `MessageVersion` row. New live messages stay invisible to `/recall`.
+2. `bot/services/import_apply.py:578` — imported `chat_messages.current_version_id`
+   never set. Imported history invisible to `/recall` (invariant #8 violation).
+3. `bot/services/import_apply.py:578` — imported versions miss `normalized_text`,
+   producing empty `search_tsv`. Combined with #2, makes Phase 2 import fully invisible.
+
+DO NOT enable `memory.qa.enabled` in production until issue #164 is closed. /recall on
+existing backfilled history works (Phase 1 T1-07 backfill set v1 versions for pre-existing
+chat_messages); breakage is in NEW live messages and Phase 2 imports.
+
+**Next active phase: Phase 4 hotfix sprint (#164)** — live v1 version + import
+current_version_id + normalized_text + secondary items (qa_traces cascade layer, router
+order, asymmetric refusal). Estimated 2-3 days.
+
+**After hotfix sprint: Phase 5 (LLM gateway + answer synthesis)** — design ratified per
+`docs/memory-system/prompts/PHASE5_PLAN_DRAFT.md`, awaiting AUTHORIZED_SCOPE.md update.
+Open follow-up beyond Phase 5: Phase 11 numbering conflict (HANDOFF = Shkoderbench/evals
+vs draft = expertise pages — reconcile required).
 
 Read these BEFORE touching anything under `bot/db/`, `bot/services/`,
 `bot/handlers/chat_messages.py`, or adding `alembic/versions/`:

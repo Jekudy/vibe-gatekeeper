@@ -167,9 +167,20 @@ ticket grid; will be picked up before or alongside Phase 4 work.
   hardening; current path is correct under aiogram contract but lacks an explicit None
   guard).
 
-## Phase 4 — Hybrid search + Q&A with citations — **CLOSED 2026-04-30**
+## Phase 4 — Hybrid search + Q&A with citations — IMPLEMENTATION MERGED, NOT PRODUCTION-READY
 
-6/6 implementation tickets merged. FHR in flight (Codex deep-product + deep-spec reviewers running over the full Phase 4 diff).
+6/6 implementation tickets merged 2026-04-30. **FHR (Codex deep-spec-reviewer) found 3 CRITICAL production-blocking gaps — tracked in [#164](https://github.com/Jekudy/vibeshkoder/issues/164). DO NOT enable `memory.qa.enabled=true` in production until #164 is closed.** Phase 4 hotfix sprint estimated 2-3 days.
+
+### CRITICAL hotfix items (issue #164):
+1. **Live v1 MessageVersion creation missing.** `bot/services/message_persistence.py:16` literally documents the gap: "MessageVersionRepo.insert_version is NOT called here (follow-up sprint)". New live messages don't get versions → `chat_messages.current_version_id` NULL → search join fails → `/recall` returns abstention for ALL new live content.
+2. **Import path doesn't set `current_version_id`.** `bot/services/import_apply.py:578` calls `insert_version` but never assigns FK back. Imported history invisible to `/recall` (invariant #8 violation).
+3. **Imported versions miss `normalized_text`.** Same file. Generated `search_tsv` requires `normalized_text + caption`; without it, FTS vector is empty.
+
+### Secondary items (also tracked in #164):
+- qa_traces cascade layer wiring on `/forget_me` (Stream E xfail documents the gap).
+- Asymmetric `/recall` refusal: DM gets polite refusal, non-community group gets silent return — should be symmetric.
+- Router order: `/recall` registered before chat_messages catch-all in `bot/__main__.py:115/117`. With flag OFF, `/recall foo` consumed by qa_router silent-return path → never reaches chat_messages persistence → invariant #1 formally violated.
+- FTS index partiality decision (medium) and QaTrace ORM/migration default drift (low) noted as polish items.
 
 **Closed deliverables:**
 - T4-01 + T4-02 via PR #151 + PR #156 hardening
