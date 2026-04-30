@@ -1,0 +1,277 @@
+[
+  {
+    "id": "rec_001",
+    "category": "morphology",
+    "query": "лошади",
+    "fixture_messages": [
+      {
+        "chat_id": -1001234567890,
+        "message_id": 1,
+        "user_id": 42001,
+        "normalized_text": "лошадь скачет по полю",
+        "memory_policy": "normal",
+        "captured_at": "2026-04-25T12:00:00+00:00"
+      }
+    ],
+    "expected_evidence_present": true,
+    "expected_chat_message_ids": [1],
+    "notes": "Russian declension match via russian stemmer"
+  },
+  {
+    "id": "rec_002",
+    "category": "recency",
+    "query": "встреча",
+    "fixture_messages": [
+      {
+        "chat_id": -1001234567890,
+        "message_id": 2,
+        "user_id": 42002,
+        "normalized_text": "встреча в субботу",
+        "memory_policy": "normal",
+        "captured_at": "2026-04-25T12:00:00+00:00"
+      },
+      {
+        "chat_id": -1001234567890,
+        "message_id": 3,
+        "user_id": 42002,
+        "normalized_text": "встреча в воскресенье",
+        "memory_policy": "normal",
+        "captured_at": "2026-04-29T12:00:00+00:00"
+      }
+    ],
+    "expected_evidence_present": true,
+    "expected_chat_message_ids": [3, 2],
+    "notes": "Equal-rank hits should prefer newer captured_at"
+  },
+  {
+    "id": "rec_003",
+    "category": "abstention",
+    "query": "квантовая физика",
+    "fixture_messages": [
+      {
+        "chat_id": -1001234567890,
+        "message_id": 4,
+        "user_id": 42003,
+        "normalized_text": "обед в столовой",
+        "memory_policy": "normal",
+        "captured_at": "2026-04-26T12:00:00+00:00"
+      }
+    ],
+    "expected_evidence_present": false,
+    "expected_chat_message_ids": [],
+    "notes": "No match should abstain"
+  },
+  {
+    "id": "rec_004",
+    "category": "governance",
+    "query": "секрет",
+    "fixture_messages": [
+      {
+        "chat_id": -1001234567890,
+        "message_id": 5,
+        "user_id": 42004,
+        "normalized_text": "секрет проекта",
+        "memory_policy": "offrecord",
+        "captured_at": "2026-04-26T13:00:00+00:00"
+      },
+      {
+        "chat_id": -1001234567890,
+        "message_id": 6,
+        "user_id": 42004,
+        "normalized_text": "большой секрет обсуждали публично",
+        "memory_policy": "normal",
+        "captured_at": "2026-04-26T14:00:00+00:00"
+      }
+    ],
+    "expected_evidence_present": true,
+    "expected_chat_message_ids": [6],
+    "notes": "Offrecord row excluded; normal row returned"
+  },
+  {
+    "id": "rec_005",
+    "category": "tombstone",
+    "query": "ошибка",
+    "fixture_messages": [
+      {
+        "chat_id": -1001234567890,
+        "message_id": 7,
+        "user_id": 42005,
+        "normalized_text": "ошибка в коде",
+        "memory_policy": "normal",
+        "captured_at": "2026-04-26T15:00:00+00:00"
+      }
+    ],
+    "fixture_forget_events": [
+      {
+        "target_type": "message",
+        "target_id": "7",
+        "tombstone_key": "message:-1001234567890:7",
+        "status": "completed"
+      }
+    ],
+    "expected_evidence_present": false,
+    "expected_chat_message_ids": [],
+    "notes": "Message tombstone excludes an otherwise matching row"
+  },
+  {
+    "id": "rec_006",
+    "category": "caption",
+    "query": "архитектура",
+    "fixture_messages": [
+      {
+        "chat_id": -1001234567890,
+        "message_id": 8,
+        "user_id": 42006,
+        "normalized_text": null,
+        "caption": "схема архитектуры памяти",
+        "memory_policy": "normal",
+        "captured_at": "2026-04-27T12:00:00+00:00"
+      }
+    ],
+    "expected_evidence_present": true,
+    "expected_chat_message_ids": [8],
+    "notes": "Caption-only messages are searchable evidence"
+  },
+  {
+    "id": "rec_007",
+    "category": "multi_token",
+    "query": "план релиза",
+    "fixture_messages": [
+      {
+        "chat_id": -1001234567890,
+        "message_id": 9,
+        "user_id": 42007,
+        "normalized_text": "план релиза согласован на пятницу",
+        "memory_policy": "normal",
+        "captured_at": "2026-04-27T13:00:00+00:00"
+      }
+    ],
+    "expected_evidence_present": true,
+    "expected_chat_message_ids": [9],
+    "notes": "Multi-token query returns the message containing both terms"
+  },
+  {
+    "id": "rec_008",
+    "category": "chat_isolation",
+    "query": "изоляция",
+    "fixture_messages": [
+      {
+        "chat_id": -1001234567890,
+        "message_id": 10,
+        "user_id": 42008,
+        "normalized_text": "изоляция работает в основном чате",
+        "memory_policy": "normal",
+        "captured_at": "2026-04-27T14:00:00+00:00"
+      },
+      {
+        "chat_id": -1009999999999,
+        "message_id": 11,
+        "user_id": 42008,
+        "normalized_text": "изоляция не должна перейти из другого чата",
+        "memory_policy": "normal",
+        "captured_at": "2026-04-29T14:00:00+00:00"
+      }
+    ],
+    "expected_evidence_present": true,
+    "expected_chat_message_ids": [10],
+    "notes": "Search stays scoped to the invocation chat_id"
+  },
+  {
+    "id": "rec_009",
+    "category": "user_tombstone",
+    "query": "профиль",
+    "fixture_messages": [
+      {
+        "chat_id": -1001234567890,
+        "message_id": 12,
+        "user_id": 42009,
+        "normalized_text": "профиль участника обновлён",
+        "memory_policy": "normal",
+        "captured_at": "2026-04-28T12:00:00+00:00"
+      }
+    ],
+    "fixture_forget_events": [
+      {
+        "target_type": "user",
+        "target_id": "42009",
+        "tombstone_key": "user:42009",
+        "status": "pending"
+      }
+    ],
+    "expected_evidence_present": false,
+    "expected_chat_message_ids": [],
+    "notes": "Pending user tombstone excludes that user's messages"
+  },
+  {
+    "id": "rec_010",
+    "category": "message_hash_tombstone",
+    "query": "хеш",
+    "fixture_messages": [
+      {
+        "chat_id": -1001234567890,
+        "message_id": 13,
+        "user_id": 42010,
+        "normalized_text": "хеш сообщения попал под удаление",
+        "memory_policy": "normal",
+        "content_hash": "qa-eval-hash-tombstone",
+        "captured_at": "2026-04-28T13:00:00+00:00"
+      }
+    ],
+    "fixture_forget_events": [
+      {
+        "target_type": "message_hash",
+        "target_id": null,
+        "tombstone_key": "message_hash:qa-eval-hash-tombstone",
+        "status": "completed"
+      }
+    ],
+    "expected_evidence_present": false,
+    "expected_chat_message_ids": [],
+    "notes": "Message-hash tombstone excludes matching content hash"
+  },
+  {
+    "id": "rec_011",
+    "category": "nomem",
+    "query": "черновик",
+    "fixture_messages": [
+      {
+        "chat_id": -1001234567890,
+        "message_id": 14,
+        "user_id": 42011,
+        "normalized_text": "черновик не для памяти",
+        "memory_policy": "nomem",
+        "captured_at": "2026-04-28T14:00:00+00:00"
+      },
+      {
+        "chat_id": -1001234567890,
+        "message_id": 15,
+        "user_id": 42011,
+        "normalized_text": "черновик можно обсудить открыто",
+        "memory_policy": "normal",
+        "captured_at": "2026-04-28T15:00:00+00:00"
+      }
+    ],
+    "expected_evidence_present": true,
+    "expected_chat_message_ids": [15],
+    "notes": "Nomem row excluded; normal row returned"
+  },
+  {
+    "id": "rec_012",
+    "category": "redacted",
+    "query": "редакция",
+    "fixture_messages": [
+      {
+        "chat_id": -1001234567890,
+        "message_id": 16,
+        "user_id": 42012,
+        "normalized_text": "редакция скрыта",
+        "memory_policy": "normal",
+        "is_redacted": true,
+        "captured_at": "2026-04-29T12:00:00+00:00"
+      }
+    ],
+    "expected_evidence_present": false,
+    "expected_chat_message_ids": [],
+    "notes": "Redacted rows are excluded from evidence"
+  }
+]
