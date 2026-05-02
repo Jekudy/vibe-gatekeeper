@@ -44,13 +44,29 @@ tickets merged: T4-01/T4-02 via PRs #151 + #156 (FTS schema + search service + h
 T4-03 via #157 (evidence bundle), T4-04 via #162 (/recall handler), T4-05 via #158
 (qa_traces audit), T4-06 via #162 (12 eval cases). T4-02H (#153) closed as duplicate of
 #156. Forward-looking design drafts for Phase 5/6/7/8/9/10/11/12 ratified as docs-only
-artifacts in `docs/memory-system/prompts/` (PRs #159 + #160). FHR in flight.
+artifacts in `docs/memory-system/prompts/` (PRs #159 + #160).
+
+**Phase 4 hotfix #164 LANDED 2026-05-02** via PR #203 (merge commit `da8a9ef`,
+19 commits, +2987/-171 LOC). Closes 3 CRITICAL FHR gaps + H1/H2/H3/N3 risk-audit
+findings + 4 Codex review findings:
+- CRITICAL 1: live v1 `MessageVersion` creation in `persist_message_with_policy`
+- CRITICAL 2/3 + H2: import_apply delegates offrecord to helper (audit symmetry)
+- H1: live `ingestion_run_id` wiring (startup + middleware)
+- H3: eval fixture rewrite via real persist path
+- N3: `raw_update_id` threading in chat_messages + edited_message handlers
+- Migration 023: backfill v1 for post-008 cohort (`current_version_id IS NULL`)
+- qa_traces cascade layer; asymmetric /recall refusal; QaTrace ORM server_default
+
+**Audit chain dormant until ops flips `memory.ingestion.raw_updates.enabled=true`**
+in production — see `docs/runbook.md`. Pre-hotfix `telegram_updates.ingestion_run_id`
+backfill deferred (one-shot UPDATE if needed).
 
 **Next active phase: Phase 5 (LLM gateway + answer synthesis)** — design ratified per
 `docs/memory-system/prompts/PHASE5_PLAN_DRAFT.md`, awaiting AUTHORIZED_SCOPE.md update
-before implementation kickoff. Open known follow-ups: qa_traces cascade layer wiring
-(deferred from Stream E xfail), Phase 11 numbering conflict (HANDOFF = Shkoderbench/evals
-vs draft = expertise pages).
+before implementation kickoff. Phase 4 hotfix gate cleared; safe to flip
+`memory.qa.enabled=true` in production after migration 023 lands. Open known
+follow-ups: Phase 11 numbering conflict (HANDOFF = Shkoderbench/evals vs draft =
+expertise pages); raw archive flag flip ops decision.
 
 Read these BEFORE touching anything under `bot/db/`, `bot/services/`,
 `bot/handlers/chat_messages.py`, or adding `alembic/versions/`:
