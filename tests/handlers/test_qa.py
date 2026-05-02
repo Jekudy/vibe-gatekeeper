@@ -18,16 +18,38 @@ def _message(
     chat_id: int = COMMUNITY_CHAT_ID,
     chat_type: str = "supergroup",
     user_id: int = 1001,
+    message_id: int = 500,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         chat=SimpleNamespace(id=chat_id, type=chat_type),
-        from_user=SimpleNamespace(id=user_id),
+        from_user=SimpleNamespace(
+            id=user_id,
+            username="testuser",
+            first_name="Test",
+            last_name=None,
+        ),
+        message_id=message_id,
         reply=AsyncMock(),
     )
 
 
 def _command(args: str | None) -> SimpleNamespace:
     return SimpleNamespace(args=args)
+
+
+def _patch_persist(handler, monkeypatch) -> None:
+    """Patch persist_message_with_policy and UserRepo.upsert for tests that use
+    community-chat messages (the new §3.5 persist block runs for those)."""
+    from bot.services.message_persistence import PersistResult
+    fake_cm = SimpleNamespace(id=1, current_version_id=None)
+    monkeypatch.setattr(
+        handler,
+        "persist_message_with_policy",
+        AsyncMock(return_value=PersistResult(
+            chat_message=fake_cm, policy="normal", is_offrecord_mark_created=False
+        )),
+    )
+    monkeypatch.setattr(handler.UserRepo, "upsert", AsyncMock())
 
 
 def _user(
@@ -84,16 +106,25 @@ async def test_flag_off_silent_return(monkeypatch) -> None:
     session = AsyncMock()
     trace_create = AsyncMock()
     run_qa = AsyncMock()
+    fake_cm = SimpleNamespace(id=1, current_version_id=None)
+    from bot.services.message_persistence import PersistResult
+    persist_mock = AsyncMock(return_value=PersistResult(
+        chat_message=fake_cm, policy="normal", is_offrecord_mark_created=False
+    ))
 
     monkeypatch.setattr(handler.FeatureFlagRepo, "get", AsyncMock(return_value=False))
     monkeypatch.setattr(handler.QaTraceRepo, "create", trace_create)
     monkeypatch.setattr(handler, "run_qa", run_qa)
+    monkeypatch.setattr(handler.UserRepo, "upsert", AsyncMock())
+    monkeypatch.setattr(handler, "persist_message_with_policy", persist_mock)
 
     await handler.recall_handler(message, _command("память"), session)
 
     message.reply.assert_not_awaited()
     run_qa.assert_not_awaited()
     trace_create.assert_not_awaited()
+    # persist IS called (even with flag off, community chat messages are persisted)
+    persist_mock.assert_awaited_once()
 
 
 async def test_dm_invocation_refuses_and_audits(monkeypatch) -> None:
@@ -123,6 +154,7 @@ async def test_non_member_refuses_and_audits(monkeypatch) -> None:
     session = AsyncMock()
     trace_create = AsyncMock()
 
+    _patch_persist(handler, monkeypatch)
     monkeypatch.setattr(handler.FeatureFlagRepo, "get", AsyncMock(return_value=True))
     monkeypatch.setattr(
         handler.UserRepo,
@@ -146,6 +178,7 @@ async def test_empty_query_usage_hint_and_audits(monkeypatch) -> None:
     session = AsyncMock()
     trace_create = AsyncMock()
 
+    _patch_persist(handler, monkeypatch)
     monkeypatch.setattr(handler.FeatureFlagRepo, "get", AsyncMock(return_value=True))
     monkeypatch.setattr(handler.UserRepo, "get", AsyncMock(return_value=_user()))
     monkeypatch.setattr(handler.QaTraceRepo, "create", trace_create)
@@ -169,6 +202,7 @@ async def test_member_with_results_renders_response(monkeypatch) -> None:
     trace_create = AsyncMock()
     run_qa = AsyncMock(return_value=_qa_result(abstained=False))
 
+    _patch_persist(handler, monkeypatch)
     monkeypatch.setattr(handler.FeatureFlagRepo, "get", AsyncMock(return_value=True))
     monkeypatch.setattr(
         handler.UserRepo,
@@ -201,6 +235,7 @@ async def test_member_no_results_abstains(monkeypatch) -> None:
     session = AsyncMock()
     trace_create = AsyncMock()
 
+    _patch_persist(handler, monkeypatch)
     monkeypatch.setattr(handler.FeatureFlagRepo, "get", AsyncMock(return_value=True))
     monkeypatch.setattr(handler.UserRepo, "get", AsyncMock(return_value=_user()))
     monkeypatch.setattr(handler.QaTraceRepo, "create", trace_create)
@@ -224,6 +259,7 @@ async def test_offrecord_query_not_echoed_and_audit_redacted(monkeypatch) -> Non
     run_qa = AsyncMock(return_value=_qa_result(abstained=True, query_redacted=True))
     query = "секретный запрос #offrecord"
 
+    _patch_persist(handler, monkeypatch)
     monkeypatch.setattr(handler.FeatureFlagRepo, "get", AsyncMock(return_value=True))
     monkeypatch.setattr(handler.UserRepo, "get", AsyncMock(return_value=_user()))
     monkeypatch.setattr(handler.QaTraceRepo, "create", trace_create)
@@ -245,6 +281,7 @@ async def test_audit_row_written_once_for_processed_invocation(monkeypatch) -> N
     session = AsyncMock()
     trace_create = AsyncMock()
 
+    _patch_persist(handler, monkeypatch)
     monkeypatch.setattr(handler.FeatureFlagRepo, "get", AsyncMock(return_value=True))
     monkeypatch.setattr(handler.UserRepo, "get", AsyncMock(return_value=_user(user_id=3030)))
     monkeypatch.setattr(handler.QaTraceRepo, "create", trace_create)
@@ -311,3 +348,106 @@ async def test_recall_in_non_community_group_handles_forbidden(monkeypatch) -> N
     # Audit row still created.
     trace_create.assert_awaited_once()
     assert trace_create.call_args.kwargs["abstained"] is True
+
+
+# ─── §3.5 flag-OFF persistence + raw_update threading tests ──────────────
+
+
+async def test_recall_with_flag_off_still_persists_message(monkeypatch) -> None:
+    """§3.5: feature flag OFF → /recall in community still persists via persist_message_with_policy.
+
+    Closes the silent-drop hole: before this fix, flag-OFF discarded the /recall
+    message entirely (no chat_messages row, no MessageVersion).
+    """
+    handler = import_module("bot.handlers.qa")
+    message = _message(chat_id=COMMUNITY_CHAT_ID)
+    session = AsyncMock()
+    fake_cm = SimpleNamespace(id=1, current_version_id=None)
+    fake_v1 = SimpleNamespace(id=10)
+
+    persist_mock = AsyncMock()
+    from bot.services.message_persistence import PersistResult
+    persist_mock.return_value = PersistResult(
+        chat_message=fake_cm, policy="normal", is_offrecord_mark_created=False
+    )
+
+    monkeypatch.setattr(handler.FeatureFlagRepo, "get", AsyncMock(return_value=False))
+    monkeypatch.setattr(handler.UserRepo, "upsert", AsyncMock())
+    monkeypatch.setattr(handler, "persist_message_with_policy", persist_mock)
+
+    raw_update_mock = SimpleNamespace(id=99)
+    await handler.recall_handler(message, _command("foo"), session, raw_update=raw_update_mock)
+
+    # persist_message_with_policy MUST be called even when flag is OFF.
+    persist_mock.assert_awaited_once()
+    call_kwargs = persist_mock.await_args.kwargs
+    assert call_kwargs.get("raw_update_id") == 99
+    assert call_kwargs.get("source") == "live"
+
+
+async def test_recall_in_dm_does_not_persist(monkeypatch) -> None:
+    """§3.5: DM /recall → no persist call (gated by chat.id == COMMUNITY_CHAT_ID)."""
+    handler = import_module("bot.handlers.qa")
+    message = _message(chat_id=1001, chat_type="private")
+    session = AsyncMock()
+
+    persist_mock = AsyncMock()
+    monkeypatch.setattr(handler.FeatureFlagRepo, "get", AsyncMock(return_value=False))
+    monkeypatch.setattr(handler.UserRepo, "upsert", AsyncMock())
+    monkeypatch.setattr(handler, "persist_message_with_policy", persist_mock)
+    monkeypatch.setattr(handler.QaTraceRepo, "create", AsyncMock())
+
+    await handler.recall_handler(message, _command("test"), session)
+
+    # In DM, persist_message_with_policy must NOT be called.
+    persist_mock.assert_not_awaited()
+
+
+async def test_recall_with_flag_off_creates_no_qa_trace(monkeypatch) -> None:
+    """§3.5: flag OFF, community chat → chat_messages persisted but qa_traces NOT created."""
+    handler = import_module("bot.handlers.qa")
+    message = _message(chat_id=COMMUNITY_CHAT_ID)
+    session = AsyncMock()
+    fake_cm = SimpleNamespace(id=2, current_version_id=None)
+
+    from bot.services.message_persistence import PersistResult
+    persist_mock = AsyncMock(return_value=PersistResult(
+        chat_message=fake_cm, policy="normal", is_offrecord_mark_created=False
+    ))
+    trace_create = AsyncMock()
+
+    monkeypatch.setattr(handler.FeatureFlagRepo, "get", AsyncMock(return_value=False))
+    monkeypatch.setattr(handler.UserRepo, "upsert", AsyncMock())
+    monkeypatch.setattr(handler, "persist_message_with_policy", persist_mock)
+    monkeypatch.setattr(handler.QaTraceRepo, "create", trace_create)
+
+    await handler.recall_handler(message, _command("foo"), session)
+
+    persist_mock.assert_awaited_once()
+    # When flag is OFF, handler returns early — no qa_traces row created.
+    trace_create.assert_not_awaited()
+
+
+async def test_recall_raw_update_id_threaded_via_param(monkeypatch) -> None:
+    """§3.5: raw_update param passed → raw_update_id threaded to persist_message_with_policy."""
+    handler = import_module("bot.handlers.qa")
+    message = _message(chat_id=COMMUNITY_CHAT_ID)
+    session = AsyncMock()
+    fake_cm = SimpleNamespace(id=3, current_version_id=None)
+
+    from bot.services.message_persistence import PersistResult
+    persist_mock = AsyncMock(return_value=PersistResult(
+        chat_message=fake_cm, policy="normal", is_offrecord_mark_created=False
+    ))
+
+    monkeypatch.setattr(handler.FeatureFlagRepo, "get", AsyncMock(return_value=False))
+    monkeypatch.setattr(handler.UserRepo, "upsert", AsyncMock())
+    monkeypatch.setattr(handler, "persist_message_with_policy", persist_mock)
+    monkeypatch.setattr(handler.QaTraceRepo, "create", AsyncMock())
+
+    raw_update = SimpleNamespace(id=555)
+    await handler.recall_handler(message, _command("test"), session, raw_update=raw_update)
+
+    # raw_update_id must equal raw_update.id.
+    call_kwargs = persist_mock.await_args.kwargs
+    assert call_kwargs.get("raw_update_id") == 555

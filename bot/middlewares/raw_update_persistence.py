@@ -52,7 +52,9 @@ class RawUpdatePersistenceMiddleware(BaseMiddleware):
             if session is not None:
                 try:
                     async with session.begin_nested():
-                        await record_update(session, event)
+                        raw_row = await record_update(session, event)
+                        if raw_row is not None:
+                            data["raw_update"] = raw_row
                 except SQLAlchemyError as exc:
                     logger.warning(
                         "raw update persistence failed; continuing to handler",
