@@ -1,4 +1,20 @@
-🚧 DRAFT — NOT AUTHORIZED.
+🚧 DRAFT — NOT AUTHORIZED. **DEFERRED — NUMBERING CONFLICT RESOLVED 2026-05-02.**
+
+> **DEFERRAL NOTICE (2026-05-02):** This draft describes "person expertise pages" and was
+> filed under "Phase 11" by an earlier exploration round. The canonical Phase 11 in
+> `ROADMAP.md`, `HANDOFF.md §Phase 11`, and `AUTHORIZED_SCOPE.md §Phase 11` is
+> **Shkoderbench / evals harness**, ratified as `docs/memory-system/PHASE11_PLAN.md` on
+> 2026-05-02 by Orchestrator C.
+>
+> This draft is preserved as a **deferred design artifact** for a future phase
+> (likely Phase 13+ or an extension of Phase 6/9). It is NOT authorized for
+> implementation. Do NOT create issues from this file. Do NOT migrate from it.
+>
+> When/if person-expertise-page work is authorized, re-number this artifact to its
+> assigned phase and re-ratify under the current AUTHORIZED_SCOPE.md before any
+> implementation begins.
+
+---
 
 # Phase 11 Plan Draft — Person Expertise Pages / "Who Knows X"
 
