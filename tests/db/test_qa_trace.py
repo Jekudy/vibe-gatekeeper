@@ -74,6 +74,21 @@ async def test_evidence_ids_jsonb_round_trip(db_session) -> None:
     assert fetched.evidence_ids == [111, 222]
 
 
+async def test_qa_trace_evidence_ids_default_via_raw_insert(db_session) -> None:
+    """§3.7: PG server_default for evidence_ids must produce [] when ORM defaults are bypassed."""
+    from sqlalchemy import text
+
+    result = await db_session.execute(
+        text(
+            "INSERT INTO qa_traces (user_tg_id, chat_id, query_redacted, abstained, created_at) "
+            "VALUES (:uid, :cid, false, false, now()) RETURNING evidence_ids"
+        ),
+        {"uid": _next_user_id(), "cid": _next_chat_id()},
+    )
+    row = result.scalar_one()
+    assert row == []
+
+
 async def test_forget_me_cascade_redacts_query(db_session) -> None:
     from bot.db.models import ForgetEvent
     from bot.db.repos.qa_trace import QaTraceRepo

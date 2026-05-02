@@ -515,6 +515,7 @@ class QaTrace(Base):
         JSON().with_variant(JSONB(), "postgresql"),
         nullable=False,
         default=list,
+        server_default="'[]'",  # align ORM with migration 022 (PG uses ::jsonb in migration)
     )
     abstained: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
