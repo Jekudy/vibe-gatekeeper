@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import logging
 from datetime import datetime
+from typing import Any
 
 from aiogram import Router
 from aiogram.exceptions import TelegramForbiddenError
@@ -11,11 +12,13 @@ from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
+from bot.db.models import TelegramUpdate
 from bot.db.repos.feature_flag import FeatureFlagRepo
 from bot.db.repos.qa_trace import QaTraceRepo
 from bot.db.repos.user import UserRepo
 from bot.services.evidence import EvidenceBundle
 from bot.services.governance import detect_policy
+from bot.services.message_persistence import persist_message_with_policy
 from bot.services.qa import run_qa
 
 logger = logging.getLogger(__name__)
@@ -103,7 +106,27 @@ async def recall_handler(
     message: Message,
     command: CommandObject,
     session: AsyncSession,
+    raw_update: TelegramUpdate | None = None,  # surfaced by RawUpdatePersistenceMiddleware
+    **data: Any,
 ) -> None:
+    # Persist the /recall message itself FIRST, regardless of feature-flag state.
+    # This closes the silent-drop hole when memory.qa.enabled=False.
+    # Only persists for community-chat messages with a known sender.
+    if message.chat.id == settings.COMMUNITY_CHAT_ID and message.from_user is not None:
+        await UserRepo.upsert(
+            session,
+            telegram_id=message.from_user.id,
+            username=getattr(message.from_user, "username", None),
+            first_name=getattr(message.from_user, "first_name", None),
+            last_name=getattr(message.from_user, "last_name", None),
+        )
+        await persist_message_with_policy(
+            session,
+            message,
+            raw_update_id=raw_update.id if raw_update is not None else None,
+            source="live",
+        )
+
     if not await FeatureFlagRepo.get(session, QA_FEATURE_FLAG):
         return
 
