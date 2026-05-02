@@ -12,7 +12,7 @@
 |----|-------------|------------------|----------|----------------------|---------|
 | **A — Synthesis chain** | Phase 5 → 6 → 7 → 8 (sequential) | `feat/p5-*`, `feat/p6-*`, `feat/p7-*`, `feat/p8-*`, `fix/p{5,6,7,8}-*`, `hotfix/p{5,6,7,8}-*`, `plan/p{5,6,7,8}-*` | `.worktrees/orch-A` (create on first use) | 022–049 | TBD |
 | **B — Lateral expansion** | Phase 9 (wiki) + Phase 10 (graph) + Phase 12 (butler docs only) | `feat/p9-*`, `feat/p10-*`, `feat/p12-*`, `fix/p{9,10,12}-*`, `plan/p{9,10,12}-*` | `.worktrees/orch-B` | 050–069 (only if Phase 9/10 ratified by AUTHORIZED_SCOPE.md and after Orchestrator A unblocks dependency) | TBD |
-| **C — Evaluation harness** | Phase 11 (Shkoderbench / evals) | `feat/p11-*`, `fix/p11-*`, `plan/p11-*` | `.worktrees/orch-C` | none (no schema changes; read-only on DB) | TBD |
+| **C — Evaluation harness** | Phase 11 (Shkoderbench / evals) | `feat/p11-*`, `fix/p11-*`, `plan/p11-*` | `.worktrees/orch-C` | none (no schema changes; read-only on DB) | 2026-05-02 |
 
 ---
 
@@ -110,7 +110,7 @@ Update this section at sprint start (in your sprint-kickoff PR) and at sprint cl
 
 | Orch | Sprint label | Tickets | Started (UTC) | Status | PRs | Notes |
 |------|--------------|---------|---------------|--------|-----|-------|
-| (none yet) | | | | | | |
+| C | sprint-0 plan ratification | T11 plan + draft reconciliation | 2026-05-02 | open | (this PR) | Promotes `PHASE11_PLAN.md` (canonical evals scope); marks `prompts/PHASE11_PLAN_DRAFT.md` (expertise pages) as deferred. No code, no schema. |
 
 ---
 
@@ -123,7 +123,8 @@ Update this section at sprint start (in your sprint-kickoff PR) and at sprint cl
 | Orch A (Phase 6) | `knowledge_cards` + `card_sources` stable | Orch B (Phase 9) wiki content; Orch B (Phase 10) graph entity nodes | Phase 6 closure |
 | Orch A (Phase 8) | `observations` table | Orch B (Phase 10) graph projection of observations | Phase 8 closure |
 | Orch A (any phase) | New content table | Orch A self: must add to `forget_cascade.CASCADE_LAYER_ORDER` in same sprint | Privacy invariant 9 |
-| Orch C | Phase 4 baseline evals | Orch A (Phase 5) regression baseline before LLM enables | Phase 11 sprint 1 closure |
+| Orch C | Phase 4 baseline evals (Wave 2 — leakage / citations / refusal) | Orch A (Phase 5) regression baseline before LLM enables | **BINDING:** Phase 5 closure requires Wave 2 PASS. Run: `EVAL_HARNESS_ENABLED=1 timeout 300 pytest -x --timeout=60 tests/evals/ -k "leakage or citations or refusal"`. See `PHASE11_PLAN.md §8.1`. |
+| Orch C (Wave 3) | LLM-synthesis hallucination + citation-drift evals | Orch A (Phase 5) post-merge regression suite | After Phase 5 close; Orch A may not declare Phase 5 stable until Wave 3 green. |
 
 ---
 
@@ -176,4 +177,4 @@ Per memory note `feedback-paranoid-orchestrator-mode` (2026-04-30) and `feedback
 
 ---
 
-**Last updated:** 2026-04-30 (created at orchestrator-registry kickoff).
+**Last updated:** 2026-05-02 (Orchestrator C kickoff: Phase 11 evals plan ratified; draft expertise-pages numbering conflict resolved).
