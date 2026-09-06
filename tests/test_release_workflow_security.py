@@ -21,6 +21,9 @@ def test_release_deploys_exact_bot_sha_only_after_images_are_pushed() -> None:
     assert "needs: build-and-push" in workflow
     assert "runs-on: [self-hosted, shkoder-vps]" in workflow
     assert "IMAGE_TAG: sha-${{ github.event.workflow_run.head_sha }}" in workflow
+    assert workflow.count("git ls-remote") == 2
+    assert "docker buildx imagetools create" in workflow
+    assert "${{ env.IMAGE_BOT }}:main" not in workflow
     assert "docker_registry_image_tag" in workflow
     assert '"$api/deploy"' in workflow
     assert '"$api/deployments/$deployment_uuid"' in workflow
